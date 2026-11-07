@@ -1,0 +1,226 @@
+{
+  "2021:boot": {
+    "file": "boot.img",
+    "gen": "2021",
+    "sha256": "63ce3d68d7319d33d4d86e9e65f8de44a85b40ea6bab778bf26e1add50b7eb60",
+    "size": 10354688,
+    "source": "WS/ota-crumpet/2021/ota_out/boot.img"
+  },
+  "2021:brhgptpl_0": {
+    "file": "brhgptpl_0.img",
+    "gen": "2021",
+    "sha256": "a5b30bff5dc20e7f426e45197b77f175a6d986ecb9329c6e96767b21a04cd2a5",
+    "size": 184320,
+    "source": "WS/ota-crumpet/2021/ota_out/brhgptpl_0.img"
+  },
+  "2021:brhgptpl_1": {
+    "file": "brhgptpl_1.img",
+    "gen": "2021",
+    "sha256": "3b7f004526084905d4a05f3cd45efff6e6871aa9e7a8abd21a43d19f7fc56a5d",
+    "size": 184320,
+    "source": "WS/ota-crumpet/2021/ota_out/brhgptpl_1.img"
+  },
+  "2021:brhgptpl_2": {
+    "file": "brhgptpl_2.img",
+    "gen": "2021",
+    "sha256": "ed242bf5dcce75a43d5411eedec7b1a24cfc12c3ae6d63e3c188689c2e2e89cc",
+    "size": 184320,
+    "source": "WS/ota-crumpet/2021/ota_out/brhgptpl_2.img"
+  },
+  "2021:brhgptpl_3": {
+    "file": "brhgptpl_3.img",
+    "gen": "2021",
+    "sha256": "063e6e09078b494d3922a86e14ae0aae244ed25a469dca5c3c32d07b261a807c",
+    "size": 184320,
+    "source": "WS/ota-crumpet/2021/ota_out/brhgptpl_3.img"
+  },
+  "2021:lk": {
+    "file": "lk.img",
+    "gen": "2021",
+    "sha256": "82794651a7f977dcd67adec52eabd19db0c09897ef68445d2dc8335c30b496bf",
+    "size": 233472,
+    "source": "WS/ota-crumpet/2021/ota_out/lk.img"
+  },
+  "2021:lk-patched": {
+    "file": "lk-patched.img",
+    "gen": "2021",
+    "sha256": "157a2deddb909b533c931f7ebbe39c5bbd7b2b9d41fb10e90a90f860a2fafaaa",
+    "size": 237568,
+    "source": "WS/tools/kamakiri/build/crumpet/lk-patched.img"
+  },
+  "2021:tee1": {
+    "file": "tee1.img",
+    "gen": "2021",
+    "sha256": "68f9cbefa012b7aa955098c024cbb2ef8f0dee83a5e635d7e1d66a4c0439bff6",
+    "size": 2367488,
+    "source": "WS/ota-crumpet/2021/ota_out/tee1.img"
+  },
+  "2021:tee2": {
+    "file": "tee2.img",
+    "gen": "2021",
+    "sha256": "68f9cbefa012b7aa955098c024cbb2ef8f0dee83a5e635d7e1d66a4c0439bff6",
+    "size": 2367488,
+    "source": "WS/ota-crumpet/2021/ota_out/tee2.img"
+  },
+  "2025:boot": {
+    "file": "boot.img",
+    "gen": "2025",
+    "sha256": "ee998730e81966a64c94b96df8943f1cc16559928635c85e639dab2297df652b",
+    "size": 9908224,
+    "source": "WS/img/boot.img"
+  },
+  "2025:brhgptpl_0": {
+    "file": "brhgptpl_0.img",
+    "gen": "2025",
+    "sha256": "d090914376da5cc679eb8799e347ac78f2be1dd88c33dcbb93428005c48b5cf4",
+    "size": 184320,
+    "source": "WS/img/brhgptpl_0.img"
+  },
+  "2025:brhgptpl_1": {
+    "file": "brhgptpl_1.img",
+    "gen": "2025",
+    "sha256": "89cb4b7cee4feeb05719c9b893cb15e15c1554ec6a8549e26906dc0714408c71",
+    "size": 184320,
+    "source": "WS/img/brhgptpl_1.img"
+  },
+  "2025:brhgptpl_2": {
+    "file": "brhgptpl_2.img",
+    "gen": "2025",
+    "sha256": "7488fa09d5fef6a9fc475631f0b70972eb2ea862fce3367c7c3aaf02f41f8d29",
+    "size": 184320,
+    "source": "WS/img/brhgptpl_2.img"
+  },
+  "2025:brhgptpl_3": {
+    "file": "brhgptpl_3.img",
+    "gen": "2025",
+    "sha256": "1fc4f90b133d67c5551014d2d410119d08f7284b9a33befffe5398687bd5229b",
+    "size": 184320,
+    "source": "WS/img/brhgptpl_3.img"
+  },
+  "2025:lk": {
+    "file": "lk.img",
+    "gen": "2025",
+    "sha256": "c4e87b94b1fb0a39bdf23e4d1aadeee55d422072b5a2b43ca3e91275e250b69d",
+    "size": 237568,
+    "source": "WS/img/lk.img"
+  },
+  "2025:pl": {
+    "file": "pl2025.bin",
+    "gen": "2025",
+    "sha256": "17bedde9f3bfae3a43655a8f8dea12dce242eb5da1b83570e6e185beaa095159",
+    "size": 149088,
+    "source": "WS/extracted/pl2025.bin"
+  },
+  "2025:tee1": {
+    "file": "tee1.img",
+    "gen": "2025",
+    "sha256": "8b0dfbc020ec108d1e3eab043c95198994cd01c1f25b04d4ec8716bd4dcde85d",
+    "size": 2367488,
+    "source": "WS/img/tee1.img"
+  },
+  "2025:tee2": {
+    "file": "tee2.img",
+    "gen": "2025",
+    "sha256": "8b0dfbc020ec108d1e3eab043c95198994cd01c1f25b04d4ec8716bd4dcde85d",
+    "size": 2367488,
+    "source": "WS/img/tee2.img"
+  },
+  "common:brom": {
+    "file": "brom_MT8167_MT8516_MT8362_8167.bin",
+    "gen": "common",
+    "sha256": "df00ca7d871fc90e091becca3108af838ac52f57596f47baabd5c4a843052635",
+    "size": 131072,
+    "source": "WS/no-alexa/brom_MT8167_MT8516_MT8362_8167.bin"
+  },
+  "common:sram": {
+    "file": "sram_MT8167_MT8516_MT8362_8167.bin",
+    "gen": "common",
+    "sha256": "e1a4a759ba65ff712a80d2a7c42b261c2ba0221f0e4e07d81e319ca11152665f",
+    "size": 2097152,
+    "source": "WS/no-alexa/sram_MT8167_MT8516_MT8362_8167.bin"
+  },
+  "own:key_continuity.json": {
+    "file": "key_continuity.json",
+    "gen": "own",
+    "sha256": "b18c40d6212ecc5a7e168e58786f5057e2e485c894a46c7381e6b04903c59e33",
+    "size": 6116,
+    "source": "WS/tools/kamakiri/build/crumpet/key_continuity.json"
+  },
+  "own:payload-lka.bin": {
+    "file": "payload-lka.bin",
+    "gen": "own",
+    "sha256": "57bf3d344765bb89a26c31489a4e8cf6f66e7b35706bf123a0a030265a5260b0",
+    "size": 2484,
+    "source": "WS/tools/amonet-koboreru/build/crumpet2021-lka/payload.bin"
+  },
+  "own:payload-lka.elf": {
+    "file": "payload-lka.elf",
+    "gen": "own",
+    "sha256": "1bbf1bd99643080876643ea06223972a2653a66538c87d7a04e7374cc7928b9e",
+    "size": 10660,
+    "source": "WS/tools/amonet-koboreru/build/crumpet2021-lka/payload.elf"
+  },
+  "own:payload-lkb.bin": {
+    "file": "payload-lkb.bin",
+    "gen": "own",
+    "sha256": "b114078a28a7120a6d8c920ba14e82f9535a70256237dbd610007b406b0d89d4",
+    "size": 2484,
+    "source": "WS/tools/amonet-koboreru/build/crumpet2021-lkb/payload.bin"
+  },
+  "own:payload-lkb.elf": {
+    "file": "payload-lkb.elf",
+    "gen": "own",
+    "sha256": "903f2c77748c0e7b098dc7fa73ecad895ebc278b4d3ac6364fb5d0dfb5c00acb",
+    "size": 10660,
+    "source": "WS/tools/amonet-koboreru/build/crumpet2021-lkb/payload.elf"
+  },
+  "own:payload.bin": {
+    "file": "payload.bin",
+    "gen": "own",
+    "sha256": "0a0eb7819add538d06a43ddb72b947f85b1f28b31dd5766198790cbf0887165e",
+    "size": 2484,
+    "source": "WS/tools/amonet-koboreru/build/crumpet2021/payload.bin"
+  },
+  "own:payload.elf": {
+    "file": "payload.elf",
+    "gen": "own",
+    "sha256": "1441d6b1198d516ef298ab62431acbccba40d126e3683c36cac7b2169591a7df",
+    "size": 10660,
+    "source": "WS/tools/amonet-koboreru/build/crumpet2021/payload.elf"
+  },
+  "own:stage1.bin": {
+    "file": "stage1.bin",
+    "gen": "own",
+    "sha256": "174bad4e3bbd0d9e3d45cab478d37ca932466c322214c31eaed70cfea3b9185c",
+    "size": 624,
+    "source": "WS/tools/kamakiri/brom-payload/stage1/stage1.bin"
+  },
+  "own:stage1.elf": {
+    "file": "stage1.elf",
+    "gen": "own",
+    "sha256": "9ee9a9df8f9f05b3ba2dd4344f828c5b94c14570a18397307e3e835f2a3e5a5e",
+    "size": 4168,
+    "source": "WS/tools/kamakiri/brom-payload/stage1/stage1.elf"
+  },
+  "own:stage2.bin": {
+    "file": "stage2.bin",
+    "gen": "own",
+    "sha256": "76e314e633b13e737843016e15519aa9d6551135b9995e3a8d4b08ea136a9b40",
+    "size": 4044,
+    "source": "WS/tools/kamakiri/brom-payload/stage2/stage2.bin"
+  },
+  "own:tz-lka.img": {
+    "file": "tz-lka.img",
+    "gen": "own",
+    "sha256": "306a1c54867ee97d379401fd3147487afb25f481f0bbda53c8d86805f0e3fb43",
+    "size": 1143312,
+    "source": "WS/tools/amonet-koboreru/build/crumpet2021-lka/tz.img"
+  },
+  "own:tz-lkb.img": {
+    "file": "tz-lkb.img",
+    "gen": "own",
+    "sha256": "e7c213e6c706256b8f7bd7886b7571bd9121c51a0d819cc7f1384d78fc06563e",
+    "size": 1143312,
+    "source": "WS/tools/amonet-koboreru/build/crumpet2021-lkb/tz.img"
+  }
+}

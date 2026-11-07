@@ -1,0 +1,80 @@
+{
+  "lk_year": "2025",
+  "tee_swap_rule": "both tee years verify under the pl2021 TEE key (modulus sha256:1ccb6bce84f0b52fb57cdc9886e1bea9691e5f3021c7372cf675b9cf4d492a32, byte-identical in pl2021/pl2025): keep stock 2021 tee in tee2 (payload fallback target) and 2021 tee through the preloader-swap window; crafted tz -> tee1 LAST per \u00a77.4 order unchanged",
+  "checks": {
+    "pl2021->lk2021": {
+      "verdict": true,
+      "evidence": "pl2021 LK verify modulus sha256:9824ee73c71c4433ba550e4aef304ca59046ea9bf7f3817a506456cce6940203 (idalib pl2021.i64 @ VMA 0x222260/0x222ba0); lk2021 sha256:82794651a7f977dcd67adec52eabd19db0c09897ef68445d2dc8335c30b496bf; on-device verify log; ground truth: pl2021 verified 2021 set on device (brick2 UART log, total 232680 == lk2021 GFH+4); pl2025 verifies 2025 set on device every boot (SBC live)"
+    },
+    "pl2021->lk2025": {
+      "verdict": true,
+      "evidence": "pl2021 LK verify modulus sha256:9824ee73c71c4433ba550e4aef304ca59046ea9bf7f3817a506456cce6940203 is byte-identical in pl2025 (file 0x2974c of img/brhgptpl_0.img); lk2025 sha256:c4e87b94b1fb0a39bdf23e4d1aadeee55d422072b5a2b43ca3e91275e250b69d; PSS/modexp/sha verify cores byte-matched across builds; pl2025 verifies lk2025 on device -> same modulus accepts it; ground truth: pl2021 verified 2021 set on device (brick2 UART log, total 232680 == lk2021 GFH+4); pl2025 verifies 2025 set on device every boot (SBC live)"
+    },
+    "pl2021->tee2021": {
+      "verdict": true,
+      "evidence": "pl2021 TEE verify modulus sha256:1ccb6bce84f0b52fb57cdc9886e1bea9691e5f3021c7372cf675b9cf4d492a32 (idalib pl2021.i64 @ VMA 0x222260/0x222ba0); tee1/tee2 2021 sha256:68f9cbefa012b7aa955098c024cbb2ef8f0dee83a5e635d7e1d66a4c0439bff6 (identical: True); on-device verify; ground truth: pl2021 verified 2021 set on device (brick2 UART log, total 232680 == lk2021 GFH+4); pl2025 verifies 2025 set on device every boot (SBC live)"
+    },
+    "pl2021->tee2025": {
+      "verdict": true,
+      "evidence": "pl2021 TEE verify modulus sha256:1ccb6bce84f0b52fb57cdc9886e1bea9691e5f3021c7372cf675b9cf4d492a32 is byte-identical in pl2025 (file 0x2a09c of img/brhgptpl_0.img); tee2025 sha256:8b0dfbc020ec108d1e3eab043c95198994cd01c1f25b04d4ec8716bd4dcde85d; pl2025 verifies it on device -> same modulus accepts it; ground truth: pl2021 verified 2021 set on device (brick2 UART log, total 232680 == lk2021 GFH+4); pl2025 verifies 2025 set on device every boot (SBC live)"
+    },
+    "lk2021->boot2025": {
+      "verdict": true,
+      "evidence": "lk2021 embeds Amazon \"Common Kernel Signing Production CA\" cert (file 0x24418, modulus sha256:bf060229d93a2827806051c280e94efe75a78812cab6544759a054341fdca068, e=65537; Engineering CA at 0x24970 sha256:4548c4238ad3247a491cf059fdf8af42d8aac2d9e4379df61e5b0822e0004f6b); boot2025 appended leaf cert sha256:9e14451d23f851f5e8d83101346b224e1b8292283bd72d6c57eb2578c54e6654 (leaf modulus sha256:31ad466b789ebe158e93d572fa8c571b91754193565a3f297740cac5e2f91108, issuer OU=Common Kernel Signing Production CA,O=Amazon Lab126,L=Sunnyvale,ST=California,C=US) signature VERIFIES under the embedded Production CA key (RSA-PSS-SHA256, salt 32); calibration: boot2021 leaf sha256:bd9ac509fe58bfa62c1de4f47d294d8ad9c8972d702a1bc559f4035df0f28ba8 also verifies; lk2025 embeds byte-identical CA certs (prod sha256:bf060229d93a2827806051c280e94efe75a78812cab6544759a054341fdca068, eng sha256:4548c4238ad3247a491cf059fdf8af42d8aac2d9e4379df61e5b0822e0004f6b)"
+    }
+  },
+  "notes": {
+    "anchor_correction": "pl2021.i64 moduli at VMA 0x222260(LK)/0x222BA0(TEE); documented 0x0022244C/0x00222D9C are the 2025 preloader VMAs",
+    "pl_keys": {
+      "lk": "9824ee73c71c4433ba550e4aef304ca59046ea9bf7f3817a506456cce6940203",
+      "tee": "1ccb6bce84f0b52fb57cdc9886e1bea9691e5f3021c7372cf675b9cf4d492a32"
+    },
+    "lk_images": {
+      "lk2021": "82794651a7f977dcd67adec52eabd19db0c09897ef68445d2dc8335c30b496bf",
+      "lk2025": "c4e87b94b1fb0a39bdf23e4d1aadeee55d422072b5a2b43ca3e91275e250b69d"
+    },
+    "tee_images": {
+      "tee2021": "68f9cbefa012b7aa955098c024cbb2ef8f0dee83a5e635d7e1d66a4c0439bff6",
+      "tee2025": "8b0dfbc020ec108d1e3eab043c95198994cd01c1f25b04d4ec8716bd4dcde85d"
+    },
+    "boot": {
+      "boot2021": {
+        "content_end": 10350592,
+        "leaf_mod_sha256": "bd9ac509fe58bfa62c1de4f47d294d8ad9c8972d702a1bc559f4035df0f28ba8",
+        "leaf_cert_sha256": "75820df79b65176a881bb0ccee073ec9b7bba3f1dd76fa62bba76ad73793de82",
+        "issuer": "OU=Common Kernel Signing Production CA,O=Amazon Lab126,L=Sunnyvale,ST=California,C=US",
+        "verifies_under_lk2021_prod_ca": true
+      },
+      "boot2025": {
+        "content_end": 9906176,
+        "leaf_mod_sha256": "31ad466b789ebe158e93d572fa8c571b91754193565a3f297740cac5e2f91108",
+        "leaf_cert_sha256": "9e14451d23f851f5e8d83101346b224e1b8292283bd72d6c57eb2578c54e6654",
+        "issuer": "OU=Common Kernel Signing Production CA,O=Amazon Lab126,L=Sunnyvale,ST=California,C=US",
+        "verifies_under_lk2021_prod_ca": true
+      }
+    },
+    "lk_ca_certs": {
+      "lk2021": {
+        "prod": {
+          "sha256": "bf060229d93a2827806051c280e94efe75a78812cab6544759a054341fdca068",
+          "subject": "OU=Common Kernel Signing Production CA,O=Amazon Lab126,L=Sunnyvale,ST=California,C=US"
+        },
+        "eng": {
+          "sha256": "4548c4238ad3247a491cf059fdf8af42d8aac2d9e4379df61e5b0822e0004f6b",
+          "subject": "OU=Common Kernel Signing Engineering CA,O=Amazon Lab126,L=Sunnyvale,ST=California,C=US"
+        }
+      },
+      "lk2025": {
+        "prod": {
+          "sha256": "bf060229d93a2827806051c280e94efe75a78812cab6544759a054341fdca068",
+          "subject": "OU=Common Kernel Signing Production CA,O=Amazon Lab126,L=Sunnyvale,ST=California,C=US"
+        },
+        "eng": {
+          "sha256": "4548c4238ad3247a491cf059fdf8af42d8aac2d9e4379df61e5b0822e0004f6b",
+          "subject": "OU=Common Kernel Signing Engineering CA,O=Amazon Lab126,L=Sunnyvale,ST=California,C=US"
+        }
+      }
+    },
+    "preloader_key_extraction": "idalib pl2021.i64 @ VMA 0x222260/0x222ba0"
+  }
+}

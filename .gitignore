@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# vendor blobs are parked: drop-ins under binaries/vendor/ never commit
+# (only the per-generation .gitkeep placeholders do)
+binaries/vendor/**
+!binaries/vendor/**/
+!binaries/vendor/**/.gitkeep
+.superpowers/
+venv/
