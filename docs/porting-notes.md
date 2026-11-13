@@ -374,3 +374,16 @@ register model built from `nfi_regs.json`). NOT a stub-class task — a
 GIC-ack model would have no donor citation (fabricated-platform
 territory). Downstream work proceeds on the surgical path (Task 14
 auth observability landed there).
+
+## §guarantee — amonet custom-firmware guarantee effort (2026-11-08)
+
+Charter: make the emu a bounded pre-flight oracle for the amonet-koboreru
+crumpet2021 chain + patched-LK custom-firmware path (plan:
+`docs/superpowers/plans/2026-11-08-amonet-customfw-guarantee.md`,
+deliverable: `docs/guarantee.md`). This effort intentionally DEVIATES from
+the donor-verbatim rule for four preloader seams (hdr_parse 0x20F2D8,
+overlap_chk 0x20F398, part_get 0x20F250, bdev_init 0x212EFC): the donor
+shipped host reimplementations, and the guarantee requires REAL vendor
+code there. Rulings for each upgrade are appended in this section by the
+landing task; the reimplementations stay reachable via
+`Emu(..., legacy_seams=True)` for differential comparison.
