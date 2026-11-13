@@ -406,3 +406,17 @@ the crafted sub-image — dynamically proving port-doc premise P3 (the
 exploit's load-bearing fallback). The CLI keeps its donor-verbatim drive
 (the shape matches the second call); the guarantee tests
 (test_real_parse_overlap.py) and the Task-7 e2e drive the real loader.
+
+### Task-3 ruling (guarantee plan): real part_get on a staged real-GPT table
+
+The donor's PART_GET synthesized-struct stub is demoted to
+`legacy_seams=True`. Default: REAL sub_20F250 (name memcpy to
+0x102A70) + the sub_20F1F8 walk execute against a table staged at
+`*(*(0x22518C)) + 0x69244` — the double deref resolves via SRAM_DBUF_PTR
+(0x102994) to DRAM_BUF+0x69244, matching the walk disasm (entries 0x14 B:
+start@0, nblk@4 (0 terminates), name*@0x10; match copied to the global
+struct 0x102A5C with the name copied to 0x102A0C/0x102A70 .bss buffers).
+Entry values come from flash.gpt.parse_gpt_from_image on the pinned
+2021:brhgptpl_0 (LBA4096 -> 512-block x8, the donor GPT-dict rule) — the
+boot-time part_init build is the staged state (LK-platform.py
+boot-state precedent). Hook observes only (part_get[real] event).

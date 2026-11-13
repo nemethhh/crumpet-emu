@@ -42,9 +42,11 @@ SEAMS = {
                         '2); claim state = guest cells at name-table+0x10 '
                         '(0x224920, in-file {0,0}); legacy host replication '
                         'behind legacy_seams=True'),
-    'part_get': Seam(0x20F250, 'reimplemented',
-                     'synthesized partition struct from the GPT dict '
-                     'replaces sub_20F250 (name compare + partition walk)'),
+    'part_get': Seam(0x20F250, 'real',
+                     'REAL sub_20F250 + sub_20F1F8 walk execute against the '
+                     'staged real-GPT entry table at *SRAM_DBUF_PTR+0x69244 '
+                     '(guarantee Task 3); donor synthesized struct behind '
+                     'legacy_seams=True'),
     'bdev_init': Seam(0x212EFC, 'reimplemented',
                       'host re-arm of the bdev struct fields replaces '
                       'sub_212EFC boot_device_init (NAND driver init)'),

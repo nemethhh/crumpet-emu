@@ -55,8 +55,6 @@ def test_no_stale_ledger_entries():
         f'missing={set(INTERCEPTED) - ledger_names}')
 
 
-@pytest.mark.xfail(strict=True, reason='Tasks 2-3 upgrade the reimplemented '
-               'seams to real code; flip the kind and drop this marker there')
 def test_chain_critical_seams_not_reimplemented():
     """Forcing function (plan Task 1): hdr_parse/overlap_chk/part_get must
     not stay host reimplementations once Tasks 2-3 land."""

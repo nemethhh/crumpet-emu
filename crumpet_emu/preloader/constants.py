@@ -49,6 +49,11 @@ CTX_HDR = DRAM_BUF + 0x666F0  # v10 in part_load
 LK_LOAD_ADDR = 0x41E00000
 TEE_LOAD_ADDR = 0x43001000
 SRAM_DBUF_PTR = 0x102994
+# part_get staging (guarantee Task 3; layout from the sub_20F1F8 disasm)
+PART_TABLE = DRAM_BUF + 0x69244  # entry table at *(*(0x22518C)) + 0x69244
+PART_TABLE_NAMES = DRAM_BUF + 0x69400  # staged name strings (scratch)
+PART_GET_OUT = 0x102A5C        # the walk's global output struct (.bss)
+PART_GET_NAMEBUF = 0x102A70    # part_get's 0x20-B input-name copy (.bss)
 
 # GPT (4096-byte LBAs) from brhgptpl_0.img -> bdev start blocks (512B units)
 # lk_b added (crumpet kamakiri task 9): start 640 LBA4096 directly after

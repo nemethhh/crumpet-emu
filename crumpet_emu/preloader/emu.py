@@ -45,6 +45,8 @@ from crumpet_emu.preloader.constants import (ASSERT, BDEV, BDEV_INIT, BDEV_READ,
                                              HEAD_CELL, LK_REGION, MAGIC_RET,
                                              MTEE_VERIFY,
                                              MEMCPY, OVERLAP_CHK, PART_GET,
+                                             PART_GET_NAMEBUF, PART_GET_OUT,
+                                             PART_TABLE, PART_TABLE_NAMES,
                                              PART_LOAD, PRINTF, SCRATCH,
                                              SECMEM_REARM, SRAM_DBUF_PTR,
                                              STACK, TEE_SET_ENTRY, TEXT_BASE,
@@ -199,12 +201,44 @@ class Emu:
         # SBC eFuse bit (bit 1 of 0x10009060) per scenario
         uc.mem_write(EFUSE_SBC, struct.pack('<I', 2 if sbc else 0))
 
+        if not legacy_seams:
+            self._stage_part_table()
+
         # payload-internal timer helpers (polled MMIO would never advance)
         for sym in ('mdelay', 'udelay', 'gpt4_get_current_tick',
                     'gpt4_tick2time_ms'):
             a = self.payload_syms.get(sym)
             if a:
                 self.timer_stubs = getattr(self, 'timer_stubs', set()) | {a}
+
+    def _stage_part_table(self):
+        """Stage the preloader partition table for the REAL part_get walk
+        (guarantee Task 3). Layout from the sub_20F1F8 disasm: entries of
+        0x14 bytes at *(*(0x22518C)) + 0x69244 — the double deref resolves
+        to *SRAM_DBUF_PTR (0x102994) = DRAM_BUF, i.e. DRAM_BUF+0x69244;
+        entry = {start@0, nblk@4 (0 terminates the table), ?@8, ?@0xC,
+        name* @0x10}; matched entries are copied by the real walk to its
+        global struct (PART_GET_OUT 0x102A5C) with the name copied to
+        PART_GET_NAMEBUF-adjacent buffers. Entry values come from the REAL
+        GPT (crumpet_emu.flash.gpt on the pinned 2021:brhgptpl_0), the
+        same source the donor stub's GPT dict was derived from — the boot-
+        time table build (real part_init over the flash GPT) is the staged
+        state, LK-platform.py boot-state precedent.
+        """
+        from crumpet_emu.flash.gpt import parse_gpt_from_image
+        uc = self.uc
+        uc.mem_write(SRAM_DBUF_PTR, struct.pack('<I', DRAM_BUF))
+        gpt = parse_gpt_from_image(PL_IMG().read_bytes())
+        off = 0
+        for i, (name, (start_lba, cnt_lba)) in enumerate(gpt.items()):
+            namep = PART_TABLE_NAMES + 0x40 * i
+            uc.mem_write(namep, name.encode() + b'\x00')
+            # GPT LBA4096 units -> bdev 512-block units (donor GPT dict rule)
+            entry = struct.pack('<IIIII', start_lba * 8, cnt_lba * 8,
+                                0, 0, namep)
+            uc.mem_write(PART_TABLE + off, entry)
+            off += 0x14
+        uc.mem_write(PART_TABLE + off, struct.pack('<IIIII', 0, 0, 0, 0, 0))
 
     def hook_uart_write(self, uc, access, address, size, value, user):
         if address == UART_THR:
@@ -319,21 +353,28 @@ class Emu:
             return
 
         if address == PART_GET:
+            if self.legacy_seams:
+                name = uc_cstr(uc, regs[UC_ARM_REG_R0], 32)
+                self.current_part = name
+                if name not in GPT:
+                    uc.reg_write(UC_ARM_REG_R0, 0)
+                else:
+                    start, nblk = GPT[name]
+                    idx = list(GPT).index(name)
+                    p = SCRATCH + 0x100 * (idx + 1)
+                    namep = SCRATCH + 0x400 + 0x40 * idx
+                    uc.mem_write(namep, name.encode() + b'\x00')
+                    blob = struct.pack('<II', start, nblk) + b'\x00' * 8 + \
+                        struct.pack('<I', namep) + b'\x00' * 0x2C
+                    uc.mem_write(p, blob)
+                    uc.reg_write(UC_ARM_REG_R0, p)
+                uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
+                return
+            # guarantee Task 3: REAL sub_20F250 + the sub_20F1F8 walk
+            # execute against the staged real-GPT table; observe only.
             name = uc_cstr(uc, regs[UC_ARM_REG_R0], 32)
             self.current_part = name
-            if name not in GPT:
-                uc.reg_write(UC_ARM_REG_R0, 0)
-            else:
-                start, nblk = GPT[name]
-                idx = list(GPT).index(name)
-                p = SCRATCH + 0x100 * (idx + 1)
-                namep = SCRATCH + 0x400 + 0x40 * idx
-                uc.mem_write(namep, name.encode() + b'\x00')
-                blob = struct.pack('<II', start, nblk) + b'\x00' * 8 + \
-                    struct.pack('<I', namep) + b'\x00' * 0x2C
-                uc.mem_write(p, blob)
-                uc.reg_write(UC_ARM_REG_R0, p)
-            uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
+            self.events.append(f'part_get[real]({name!r})')
             return
 
         if address == BDEV_INIT:
