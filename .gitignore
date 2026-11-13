@@ -8,3 +8,4 @@ binaries/vendor/**
 !binaries/vendor/**/.gitkeep
 .superpowers/
 venv/
+.worktrees
