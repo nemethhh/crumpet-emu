@@ -108,19 +108,29 @@ def trace_diff(uart_log: Path) -> int:
     """Classify emulated stock-boot preloader lines vs a real capture."""
     import io
     import contextlib
-    from crumpet_emu.preloader import scenarios
+    from crumpet_emu import resources
+    from crumpet_emu.flash.image import Flash
+    from crumpet_emu.preloader import emu as pe
     buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        scenarios.stock_boot(sbc=True)
-    # stock_boot prints PL lines via the emu log; re-run to capture them
-    emu_lines = [l for l in buf.getvalue().splitlines() if '[PL' in l]
+    stock_lk = resources.resolve('lk', '2021').read_bytes()
+    tee2 = resources.resolve('tee2', '2021').read_bytes()
+    with contextlib.redirect_stdout(io.StringIO()):    # scenario prints
+        emu = pe.Emu(Flash(tee2, stock_lk, tee2), sbc=True, log=buf)
+        pe.arm_device(emu)
+        from crumpet_emu.preloader.constants import (BDEV, LK_LOAD_ADDR,
+                                                     PART_LOAD, SCRATCH)
+        lk_part = pe.part_struct(emu, 'lk_a', SCRATCH)
+        a1, s1 = SCRATCH + 0x40, SCRATCH + 0x44
+        emu.uc.mem_write(a1, struct.pack('<I', LK_LOAD_ADDR))
+        emu.try_call(PART_LOAD, (BDEV, lk_part, a1, 0, s1),
+                     timeout=30_000_000)
+    emu_lines = buf.getvalue().splitlines()
     dev_lines = [l.rstrip('\n') for l in uart_log.read_text(
         errors='replace').splitlines() if l.strip()]
     exact = prefix = 0
     for el in emu_lines:
-        body = el.split('] ', 1)[-1].strip()
-        hit = any(body == d.strip() for d in dev_lines)
-        if hit:
+        body = el.split('] ', 1)[-1].strip() if '] ' in el else el.strip()
+        if any(body == d.strip() for d in dev_lines):
             exact += 1
         elif any(d.strip().startswith(body[:16]) for d in dev_lines):
             prefix += 1
