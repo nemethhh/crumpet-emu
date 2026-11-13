@@ -74,6 +74,7 @@ python3 -m pytest tests/test_hunting.py        # injection/differential/fuzz/cov
 | `scenarios/lk_fastboot.py` | one fastboot command over the USB seam (`--cmd 'flash:otucode' --data F`, `--getvar all`) | yes (2025 `lk.img`) |
 | `scenarios/differential.py` | variant cross-product + first UART divergence (`--variants 'sbc=on,off'`, `--layer preloader|lk`) | yes (layer-dependent) |
 | `scenarios/fuzz_fastboot.py` | checkpoint-restored fastboot fuzzing (`--cp CHECKPOINT --cases N`) | yes (baseline checkpoint) |
+| `scenarios/guarantee.py` | the amonet custom-firmware guarantee matrix: real-seam chain (both slots) + patched-LK unlock legs + BROM belt + seam ledger; `--json`, `--trace-diff UART_LOG` | yes (full) · `--help` Tier 1 |
 
 All CLIs are thin argparse wrappers over package APIs; binary resolution
 is lazy (call time), so `--help` never needs vendor bins and a missing
@@ -97,6 +98,8 @@ binaries/               manifest + committed own artifacts; vendor/ is gitignore
 docs/                   architecture, hunting guide, provenance, porting notes
 tools/                  patched-LK patch derivation/verification (IDA-derived patch set)
 ```
+
+Guarantee: [`docs/guarantee.md`](docs/guarantee.md) — what the emulator proves about the amonet-koboreru chain on real silicon, the seam fidelity matrix, and the irreducible hardware-risk register.
 
 Docs: [`docs/architecture.md`](docs/architecture.md) (layers, entry
 points, memory maps, import map) ·
