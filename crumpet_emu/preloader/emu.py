@@ -184,6 +184,7 @@ class Emu:
         uc.mem_map(0x43000000, 0x100000)     # TEE
 
         pl = PL_IMG().read_bytes()
+        self.pl_img = pl                 # hostcrypto_pl key source (Task 5)
         text = pl[TEXT_BASE - FILE_DELTA: TEXT_BASE - FILE_DELTA + 0x3D000]
         uc.mem_write(0x201000, text)
         uc.mem_write(TRAMP, struct.pack('<HH', 0xDEFE, 0xDEFE))  # udf #imm
@@ -321,20 +322,26 @@ class Emu:
             return
 
         if address == VERIFY_LK:
-            # RSA oracle: r0 = image address, r1 = size (per gate call site
-            # 0x20F6C4: sub_201D70(load_addr, size, 0, ...)). The genuine
-            # stock image passes; anything else (patched/custom) fails.
+            # REAL host-side RSA-2048/PSS against the Amazon LK modulus
+            # embedded in the pinned preloader (guarantee Task 5; recipe =
+            # sub_201D70 per preloader-vuln-signature.md §3.1). Replaces the
+            # stock-bytes-equality oracle: any genuinely Amazon-signed image
+            # passes (silicon truth), everything else fails.
             img, size = regs[UC_ARM_REG_R0], regs[UC_ARM_REG_R1]
             data = bytes(uc.mem_read(img, size)) if size else b''
-            # the loaded image is the sub-image DATA (file bytes after the
-            # 512-byte partition header)
-            if self.stock_ok and data == self.stock_ok[0x200:0x200 + size]:
-                self.verify_calls += 1
-                self.events.append('RSA_VERIFY: stock image -> PASS (prod key)')
+            from crumpet_emu.preloader.hostcrypto_pl import verify_lk_signature
+            self.verify_calls += 1
+            try:
+                ok = verify_lk_signature(data, self.pl_img)
+            except ValueError as ex:
+                self.events.append(f'RSA_VERIFY[real-rsa] key error: {ex}')
+                ok = False
+            if ok:
+                self.events.append('RSA_VERIFY[real-rsa]: Amazon-signed -> PASS')
                 uc.reg_write(UC_ARM_REG_R0, 0)
             else:
-                self.verify_calls += 1
-                self.events.append('RSA_VERIFY_CALLED on unsigned image -> FAIL')
+                self.events.append(
+                    'RSA_VERIFY[real-rsa] on unsigned image -> FAIL')
                 uc.reg_write(UC_ARM_REG_R0, 0xFFFFFFFF)
             uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
             return

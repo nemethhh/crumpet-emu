@@ -27,7 +27,8 @@ from collections import namedtuple
 
 Seam = namedtuple('Seam', 'vma kind citation')
 
-KINDS = ('real', 'staged', 'oracle-conservative', 'reimplemented', 'stub')
+KINDS = ('real', 'staged', 'oracle-conservative', 'reimplemented',
+         'stub', 'real-crypto-host')
 
 SEAM_CHAIN_CRITICAL = frozenset({'hdr_parse', 'overlap_chk', 'part_get'})
 
@@ -60,10 +61,13 @@ SEAMS = {
     'part_load': Seam(0x20F4A8, 'real',
                       'hook observes entry args only; the real NS6548 '
                       'part_load runs (donor emu_chain docstring)'),
-    'verify_lk': Seam(0x201D70, 'oracle-conservative',
-                      'RSA oracle: genuine stock image -> PASS, anything '
-                      'else -> FAIL (more pessimistic than silicon: no '
-                      'custom image can accidentally pass)'),
+    'verify_lk': Seam(0x201D70, 'real-crypto-host',
+                      'REAL host-side RSA-2048/PSS vs the Amazon LK modulus '
+                      'embedded in the pinned preloader (guarantee Task 5; '
+                      'key VMA 0x222260 from sub_201D70\'s own pool — the '
+                      'recovery-note 0x22244C is wrong for this build). '
+                      'Silicon truth: only genuinely Amazon-signed images '
+                      'pass; tests/test_pl_hostcrypto.py'),
     'mtee_verify': Seam(0x216140, 'oracle-conservative',
                         'always-OK for the genuine donor tee2 images the '
                       'chain loads; the crafted tee1 aborts its read '

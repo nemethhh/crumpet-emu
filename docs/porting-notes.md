@@ -443,3 +443,26 @@ that mechanism with observed stock values. Real-init upgrade path:
 extend NfiModel to answer the pl2021 driver register traffic, then the
 whole read path (0x212AA1) becomes real code — deferred as
 high-value-later (ledger minor).
+
+### Task-5 ruling (guarantee plan): VERIFY_LK = real host crypto
+
+The stock-bytes-equality RSA oracle is replaced by REAL host-side
+RSA-2048/PSS (crumpet_emu/preloader/hostcrypto_pl.py) against the
+Amazon LK modulus embedded in the pinned preloader — recipe exactly
+sub_201D70's (recovery-notes/preloader-vuln-signature.md §3.1: sig =
+last 0x100, SHA-256 over the data, PSS salt 0x20, embits 2047,
+e 65537).
+
+KEY-VMA CORRECTION (guarantee Task 5 finding): the recovery-note's key
+location VMA 0x22244C / file 0x2974C is WRONG for the pinned NS6548
+2021 image (that offset holds a pointer table). sub_201D70's own
+pc-relative pool (ldr r1,[pc,#0x100] @0x201DA0) resolves the key to
+VMA 0x222260 / file 0x29560, where the recorded modulus fingerprint
+(9824ee73…) actually lives. hostcrypto_pl fails loudly on fingerprint
+mismatch.
+
+Conservatism note: real crypto is the silicon truth (any
+Amazon-signed image passes); the old oracle was accidentally stricter
+(only byte-exact stock). For the chain verdict both directions agree:
+the custom/patched LK fails both — that failure is what makes the
+payload's LK_VERIFY_GATE_PATCH load-bearing (brick-2 mechanism).
