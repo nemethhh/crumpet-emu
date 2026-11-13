@@ -466,3 +466,23 @@ Amazon-signed image passes); the old oracle was accidentally stricter
 (only byte-exact stock). For the chain verdict both directions agree:
 the custom/patched LK fails both — that failure is what makes the
 payload's LK_VERIFY_GATE_PATCH load-bearing (brick-2 mechanism).
+
+### Task-6 ruling (guarantee plan): patched LK executes; two surgical
+### ceilings recorded
+
+crumpet_emu/lk/customfw.py runs the PATCHED LK as real code:
+- lock gate: real cmd_lock_check — stock 'flash:boot' -> 1 (restricted),
+  patched -> 0 (allowed); getvar allowed both (not blocklisted);
+- verify_and_vb (0x41E11548(start, size)) on an unsigned custom image:
+  stock executes the RED block (FAILED AUTHENTICATION, vbstate 3,
+  ret -0xD); patched 0x41E1158C branches straight to 0x41E115AE (publish
+  path) — the RED-abort patch's exact semantics, executed.
+
+Ceilings (honest, not stubbed around): (1) the publish path deeper than
+its first stages needs natural-boot state (M2 class — wfi/IRQ blocker);
+(2) fastboot flash WRITE path needs LK's boot-built partition table +
+mmc stack (fault at ptable walk 0x41E19456, NULL head). The operator's
+real flash routes (Linux-root dd; mtkclient via DA-patched preloader
+USBDL) are covered by the deploy pipeline against the emulated chip
+(tests/test_layer4_closedloop.py) instead. vbstate cell: double-deref
+chain *0x41E38D10 (from 0x41E11548's own pc-relative pool).
