@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-SCENARIOS = ('boot_brom', 'lk_unlock', 'differential', 'fuzz_fastboot')
+SCENARIOS = ('boot_brom', 'lk_unlock', 'differential', 'fuzz_fastboot',
+            'guarantee')
 
 
 def _load(name):
