@@ -486,3 +486,13 @@ real flash routes (Linux-root dd; mtkclient via DA-patched preloader
 USBDL) are covered by the deploy pipeline against the emulated chip
 (tests/test_layer4_closedloop.py) instead. vbstate cell: double-deref
 chain *0x41E38D10 (from 0x41E11548's own pc-relative pool).
+
+### Task-8 ruling (guarantee plan): real dispatcher loop = M2 ceiling
+
+Probe (probes/fb_loop_probe.py): surgical fastboot_init (0x41E1E3B4)
+logs 'fastboot_init()' then faults at 0x41E1BA90 (read addr=0x8) — the
+handler-registration linked list is boot-time heap state, cold-NULL. The
+real command loop (0x41E1E1A2) therefore cannot be entered surgically
+without fabricating that state (out of stub class per the M2 ruling).
+No code: the unlock-leg evidence stays the per-handler surgical
+dispatch + the real-callee lock-gate differential (Task 6).

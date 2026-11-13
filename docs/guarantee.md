@@ -38,7 +38,20 @@ closed-loop deploy leg — each with the test id that pins it)
 
 ## 3. LK unlock-leg seams
 
-(patch-set verification + surgical execution ceiling; filled by Task 6/8)
+- Patch-set byte verification: tests/test_lk_patches.py (three sites
+  re-derived from the stock donor, byte-diff allowlist).
+- Executed on real patched bytes (Task 6): cmd_lock_check differential,
+  verify_and_vb RED-abort acceptance, getvar plumbing
+  (crumpet_emu/lk/customfw.py, tests/test_lk_customfw.py).
+- Task-8 probe: the REAL fastboot dispatcher loop (0x41E1E1A2) is NOT
+  reachable surgically — fastboot_init (0x41E1E3B4) faults at its
+  handler-registration list (NULL head, boot-time heap state; probe:
+  INVALID read addr=0x8 @0x41E1BA90 after logging 'fastboot_init()').
+  Ceiling is M2-class (same boot-state staging family as the wfi/IRQ
+  blocker, porting-notes §platform 5c). FastbootHost's per-handler
+  surgical dispatch remains the unlock-leg execution surface; the lock
+  gate itself is proven at its real callee with the real call-site
+  argument shape.
 
 ## 4. Risk register (irreducible hardware risks)
 
