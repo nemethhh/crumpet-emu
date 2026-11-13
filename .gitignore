@@ -9,3 +9,4 @@ binaries/vendor/**
 .superpowers/
 venv/
 .worktrees
+venv
