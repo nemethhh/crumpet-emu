@@ -32,14 +32,16 @@ KINDS = ('real', 'staged', 'oracle-conservative', 'reimplemented', 'stub')
 SEAM_CHAIN_CRITICAL = frozenset({'hdr_parse', 'overlap_chk', 'part_get'})
 
 SEAMS = {
-    'hdr_parse': Seam(0x20F2D8, 'reimplemented',
-                      'host parser replaces sub_20F2D8 (sequential sub-image '
-                      'header parse); donor emu_chain stub kept verbatim in '
-                      'the Task-10 port — port doc §6 constants table'),
-    'overlap_chk': Seam(0x20F398, 'reimplemented',
-                        'host replication of check_part_overlapped '
-                        '(README semantics; name table @0x224910) — the '
-                        'vulnerability function itself; port doc §3'),
+    'hdr_parse': Seam(0x20F2D8, 'real',
+                      'REAL sub_20F2D8 executes (guarantee Task 2); the hook '
+                      'only mirrors its ctx into last_hdr. Donor host-parser '
+                      'reimplementation kept behind legacy_seams=True '
+                      '(tests/test_real_parse_overlap.py differential)'),
+    'overlap_chk': Seam(0x20F398, 'real',
+                        'REAL check_part_overlapped executes (guarantee Task '
+                        '2); claim state = guest cells at name-table+0x10 '
+                        '(0x224920, in-file {0,0}); legacy host replication '
+                        'behind legacy_seams=True'),
     'part_get': Seam(0x20F250, 'reimplemented',
                      'synthesized partition struct from the GPT dict '
                      'replaces sub_20F250 (name compare + partition walk)'),

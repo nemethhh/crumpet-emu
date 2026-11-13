@@ -26,8 +26,8 @@ the four reimplemented seams.
 
 | seam | VMA | kind today | target kind | test |
 |------|-----|-----------|-------------|------|
-| hdr_parse | 0x20F2D8 | reimplemented | real | Task 2 |
-| overlap_chk | 0x20F398 | reimplemented | real | Task 2 |
+| hdr_parse | 0x20F2D8 | **real** (Task 2) | real | tests/test_real_parse_overlap.py |
+| overlap_chk | 0x20F398 | **real** (Task 2) | real | tests/test_real_parse_overlap.py |
 | part_get | 0x20F250 | reimplemented | real | Task 3 |
 | bdev_init | 0x212EFC | reimplemented | real or staged+justification | Task 4 |
 

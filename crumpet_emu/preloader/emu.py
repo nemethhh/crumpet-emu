@@ -42,7 +42,8 @@ from crumpet_emu.flash.image import GPT
 from crumpet_emu.preloader.constants import (ASSERT, BDEV, BDEV_INIT, BDEV_READ,
                                              BLKSZ, BOUNCE, DRAM_BUF, EFUSE_SBC,
                                              FILE_DELTA, HDR_PARSE,
-                                             HEAD_CELL, MAGIC_RET, MTEE_VERIFY,
+                                             HEAD_CELL, LK_REGION, MAGIC_RET,
+                                             MTEE_VERIFY,
                                              MEMCPY, OVERLAP_CHK, PART_GET,
                                              PART_LOAD, PRINTF, SCRATCH,
                                              SECMEM_REARM, SRAM_DBUF_PTR,
@@ -153,8 +154,11 @@ def fmt_stub(uc, r0, r1, r2, r3, sp):
 
 class Emu:
     def __init__(self, flash, sbc=True, log=sys.stdout, payload_syms=None,
-                 stock_ok=None):
+                 stock_ok=None, legacy_seams=False):
         self.f, self.sbc, self.log = flash, sbc, log
+        self.legacy_seams = legacy_seams  # guarantee Task 2: True = donor's
+        # reimplemented hdr-parse/overlap stubs; False (default) = REAL
+        # sub_20F2D8/sub_20F398 execute, hooks observe only.
         self.payload_syms = payload_syms or {}
         self.stock_ok = stock_ok  # genuine stock image bytes: RSA passes for these
         self.timer = 0
@@ -358,52 +362,74 @@ class Emu:
             return
 
         if address == HDR_PARSE:
-            # parse the part_hdr from the buffer the header read landed in
-            # (direct dst buffer; sub-image start is 512-aligned on this bdev)
-            hdst = self.reads[0][0] if self.reads else BOUNCE
-            intra = self.cur_offset & (BLKSZ - 1)
-            hdr = bytes(uc.mem_read(hdst + intra, 0x200))
+            if self.legacy_seams:
+                # parse the part_hdr from the buffer the header read landed in
+                # (direct dst buffer; sub-image start is 512-aligned on this bdev)
+                hdst = self.reads[0][0] if self.reads else BOUNCE
+                intra = self.cur_offset & (BLKSZ - 1)
+                hdr = bytes(uc.mem_read(hdst + intra, 0x200))
+                magic, dsize = struct.unpack_from('<II', hdr, 0)
+                name = hdr[8:40].split(b'\x00')[0]
+                maddr, mode = struct.unpack_from('<II', hdr, 40)
+                self.last_hdr = (magic, dsize, name, maddr, mode)
+                maddr_p, size_p = regs[UC_ARM_REG_R1], regs[UC_ARM_REG_R2]
+                uc.mem_write(maddr_p, struct.pack('<II', maddr, mode))
+                uc.mem_write(size_p, struct.pack('<I', dsize))
+                if magic != 0x58881688:
+                    self.events.append(f'HDR BAD MAGIC {hex(magic)} -> parse error')
+                    uc.reg_write(UC_ARM_REG_R0, 0xFFFFFFFF)
+                else:
+                    self.events.append(f'HDR name={name!r} dsize={hex(dsize)} '
+                                       f'maddr={hex(maddr)} mode={mode}')
+                    uc.reg_write(UC_ARM_REG_R0, 0)
+                uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
+                return
+            # guarantee Task 2: REAL sub_20F2D8 executes; observe its ctx
+            # inputs only (last_hdr mirror kept for CAL-2-style asserts)
+            hdr = bytes(uc.mem_read(regs[UC_ARM_REG_R0], 0x30))
             magic, dsize = struct.unpack_from('<II', hdr, 0)
             name = hdr[8:40].split(b'\x00')[0]
             maddr, mode = struct.unpack_from('<II', hdr, 40)
             self.last_hdr = (magic, dsize, name, maddr, mode)
-            maddr_p, size_p = regs[UC_ARM_REG_R1], regs[UC_ARM_REG_R2]
-            uc.mem_write(maddr_p, struct.pack('<II', maddr, mode))
-            uc.mem_write(size_p, struct.pack('<I', dsize))
-            if magic != 0x58881688:
-                self.events.append(f'HDR BAD MAGIC {hex(magic)} -> parse error')
-                uc.reg_write(UC_ARM_REG_R0, 0xFFFFFFFF)
-            else:
-                self.events.append(f'HDR name={name!r} dsize={hex(dsize)} '
-                                   f'maddr={hex(maddr)} mode={mode}')
-                uc.reg_write(UC_ARM_REG_R0, 0)
-            uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
+            self.events.append(f'HDR[real] name={name!r} dsize={hex(dsize)} '
+                               f'maddr={hex(maddr)} mode={hex(mode)}')
             return
 
         if address == OVERLAP_CHK:
-            # faithful replication of check_part_overlapped (README semantics,
-            # name table at 0x224910 == {lk, lk_a, lk_b, uboot})
-            load_addr = regs[UC_ARM_REG_R1]
-            magic, dsize, name, maddr, mode = self.last_hdr
-            NAMES = (b'lk', b'lk_a', b'lk_b', b'uboot')
-            if name in NAMES:
-                self.lk_region = (load_addr, load_addr + dsize - 1)
-                self.events.append(f'  overlap: {name!r} claims '
-                                   f'{hex(load_addr)}-{hex(load_addr + dsize - 1)}, '
-                                   f'return OK (no overlap check)')
-                uc.reg_write(UC_ARM_REG_R0, 0)
-            else:
-                s, e = load_addr, load_addr + dsize - 1
-                rs, re_ = self.lk_region
-                if not (e < rs or s > re_):
-                    self.events.append(f'  !!! overlap assert (239): range '
-                                       f'{hex(s)}-{hex(e)} vs lk_region '
-                                       f'{hex(rs)}-{hex(re_)} -> panic')
-                    uc.reg_write(UC_ARM_REG_R0, 0xFFFFFFFF)
-                else:
-                    self.events.append(f'  overlap: {name!r} {hex(s)}-{hex(e)} OK')
+            if self.legacy_seams:
+                # faithful replication of check_part_overlapped (README semantics,
+                # name table at 0x224910 == {lk, lk_a, lk_b, uboot})
+                load_addr = regs[UC_ARM_REG_R1]
+                magic, dsize, name, maddr, mode = self.last_hdr
+                NAMES = (b'lk', b'lk_a', b'lk_b', b'uboot')
+                if name in NAMES:
+                    self.lk_region = (load_addr, load_addr + dsize - 1)
+                    self.events.append(f'  overlap: {name!r} claims '
+                                       f'{hex(load_addr)}-{hex(load_addr + dsize - 1)}, '
+                                       f'return OK (no overlap check)')
                     uc.reg_write(UC_ARM_REG_R0, 0)
-            uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
+                else:
+                    s, e = load_addr, load_addr + dsize - 1
+                    rs, re_ = self.lk_region
+                    if not (e < rs or s > re_):
+                        self.events.append(f'  !!! overlap assert (239): range '
+                                           f'{hex(s)}-{hex(e)} vs lk_region '
+                                           f'{hex(rs)}-{hex(re_)} -> panic')
+                        uc.reg_write(UC_ARM_REG_R0, 0xFFFFFFFF)
+                    else:
+                        self.events.append(f'  overlap: {name!r} {hex(s)}-{hex(e)} OK')
+                        uc.reg_write(UC_ARM_REG_R0, 0)
+                uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
+                return
+            # guarantee Task 2: REAL check_part_overlapped executes; observe
+            # only — claim state lives in the guest cells at name-table+0x10
+            # (in-file init {0,0}); see guest_lk_region().
+            hdrp = regs[UC_ARM_REG_R0]
+            start = regs[UC_ARM_REG_R1]
+            dsize, = struct.unpack('<I', bytes(uc.mem_read(hdrp + 4, 4)))
+            name = bytes(uc.mem_read(hdrp + 8, 32)).split(b'\x00')[0]
+            self.events.append(f'  overlap[real]: name={name!r} start={hex(start)} '
+                               f'end={hex(start + dsize - 1)}')
             return
 
         if address == 0x20192C:      # ARB fuse-version read (efuse clz decode)
@@ -452,6 +478,11 @@ class Emu:
             return
 
     # ---------------- drivers ----------------
+    def guest_lk_region(self):
+        """REAL check_part_overlapped claim state (guest cells at
+        name-table+0x10; in-file init {0,0} — README semantics)."""
+        return struct.unpack('<II', bytes(self.uc.mem_read(LK_REGION, 8)))
+
     def call(self, addr, args=(), timeout=0, count=0):
         uc = self.uc
         sp = STACK - 0x200

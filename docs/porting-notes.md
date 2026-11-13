@@ -387,3 +387,22 @@ shipped host reimplementations, and the guarantee requires REAL vendor
 code there. Rulings for each upgrade are appended in this section by the
 landing task; the reimplementations stay reachable via
 `Emu(..., legacy_seams=True)` for differential comparison.
+
+### Task-2 ruling (guarantee plan): real hdr-parse + overlap, legacy mode
+
+The donor's HDR_PARSE/OVERLAP_CHK reimplementations are demoted to
+`Emu(..., legacy_seams=True)` (default False). Default path: the REAL
+sub_20F2D8 and sub_20F398 execute; hooks observe only (last_hdr mirror;
+`overlap[real]` event lines; claim state = guest cells at 0x224920,
+in-file init {0,0}, name ptrs in-file pre-relocated — probe-verified).
+
+Probe finding recorded for the guarantee: the donor CLI's phase-1 drive
+(`part_load` at offset 0xE800 with a fabricated `*addr == 0`) models only
+the loader's SECOND sub-image call. Driving offset 0 with `*addr == 0`
+under the real parsers panics on the atf sub-image — correct real
+behavior for that wrong shape. The REAL stock loader sub_20E19C walks
+atf first at TEE_LOAD_ADDR (0x43001000) and passes its own zero cell for
+the crafted sub-image — dynamically proving port-doc premise P3 (the
+exploit's load-bearing fallback). The CLI keeps its donor-verbatim drive
+(the shape matches the second call); the guarantee tests
+(test_real_parse_overlap.py) and the Task-7 e2e drive the real loader.
