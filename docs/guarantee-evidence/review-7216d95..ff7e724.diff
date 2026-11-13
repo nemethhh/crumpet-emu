@@ -1,0 +1,2202 @@
+# Review package: 7216d95843d5c40611572937e78195c5f3b9f35a..HEAD
+
+## Commits
+ff7e724 docs(guarantee): the bounded-guarantee deliverable + README/PROJECT-STATE links (Task 10)
+9f45de0 fix(guarantee): trace-diff explicit log capture (default-arg stdout bind)
+52d9b76 feat(guarantee): scenarios/guarantee.py CLI — verdict matrix + trace-diff (Task 9)
+a313016 docs(guarantee): dispatcher-loop probe ruling — M2 ceiling (Task 8)
+0fbe8f3 feat(guarantee): end-to-end custom-firmware guarantee test, both slots (Task 7)
+97fbd61 feat(guarantee): execute the patched LK — lock gate + RED-abort acceptance on real code (Task 6)
+b863b01 feat(guarantee): real host RSA/PSS for VERIFY_LK + key-VMA correction (Task 5)
+a94cc65 feat(guarantee): bdev_init staged ruling + real-init decode (Task 4)
+9107f97 feat(guarantee): REAL part_get walk on staged real-GPT table (Task 3)
+480d21c feat(guarantee): REAL header-parse + check_part_overlapped on the amonet chain (Task 2)
+8cd7991 feat(guarantee): seam inventory ledger + charter (Task 1)
+8e26aaa chore: ignore venv symlink in worktree
+d78faf5 plan: amonet custom-firmware guarantee
+
+## Files changed
+ .gitignore                                         |   1 +
+ README.md                                          |   3 +
+ crumpet_emu/lk/customfw.py                         | 123 +++++++++++++
+ crumpet_emu/preloader/constants.py                 |   7 +
+ crumpet_emu/preloader/emu.py                       | 205 ++++++++++++++-------
+ crumpet_emu/preloader/hostcrypto_pl.py             |  66 +++++++
+ crumpet_emu/preloader/seams.py                     | 124 +++++++++++++
+ docs/guarantee.md                                  | 134 ++++++++++++++
+ docs/porting-notes.md                              | 122 ++++++++++++
+ .../plans/2026-11-08-amonet-customfw-guarantee.md  | 177 ++++++++++++++++++
+ scenarios/guarantee.py                             | 179 ++++++++++++++++++
+ tests/test_customfw_guarantee.py                   | 120 ++++++++++++
+ tests/test_lk_customfw.py                          |  91 +++++++++
+ tests/test_pl_hostcrypto.py                        |  83 +++++++++
+ tests/test_real_parse_overlap.py                   | 134 ++++++++++++++
+ tests/test_real_part_get.py                        | 131 +++++++++++++
+ tests/test_scenario_clis.py                        |   3 +-
+ tests/test_seam_ledger.py                          |  63 +++++++
+ 18 files changed, 1702 insertions(+), 64 deletions(-)
+
+## Diff
+diff --git a/.gitignore b/.gitignore
+index ef167f7..ff04149 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -2,10 +2,11 @@ __pycache__/
+ *.pyc
+ .pytest_cache/
+ # vendor blobs are parked: drop-ins under binaries/vendor/ never commit
+ # (only the per-generation .gitkeep placeholders do)
+ binaries/vendor/**
+ !binaries/vendor/**/
+ !binaries/vendor/**/.gitkeep
+ .superpowers/
+ venv/
+ .worktrees
++venv
+diff --git a/README.md b/README.md
+index 36d7595..9944a92 100644
+--- a/README.md
++++ b/README.md
+@@ -67,20 +67,21 @@ python3 -m pytest tests/test_hunting.py        # injection/differential/fuzz/cov
+ ## Scenario CLIs
+ 
+ | CLI | what it does | bins? |
+ |---|---|---|
+ | `scenarios/preloader_chain.py` | donor emu_chain surface: payload tz / `--calibrate` / `--preflight` / `--from-chip-dump` | yes (2021 set) |
+ | `scenarios/boot_brom.py` | classify a chip snapshot (default: stock 2021 belt) through the real BROM (`boots_2021_pl` / `brom_usdl_wait` / `invalid`) | yes (`common:brom` + 2021 belt) |
+ | `scenarios/lk_unlock.py` | donor unlock battery as subcommands: `keydump vcode vunlock otu otu-glitch bootimg certdriver b64 otucode-derive` | yes (2025 `lk.img`) |
+ | `scenarios/lk_fastboot.py` | one fastboot command over the USB seam (`--cmd 'flash:otucode' --data F`, `--getvar all`) | yes (2025 `lk.img`) |
+ | `scenarios/differential.py` | variant cross-product + first UART divergence (`--variants 'sbc=on,off'`, `--layer preloader|lk`) | yes (layer-dependent) |
+ | `scenarios/fuzz_fastboot.py` | checkpoint-restored fastboot fuzzing (`--cp CHECKPOINT --cases N`) | yes (baseline checkpoint) |
++| `scenarios/guarantee.py` | the amonet custom-firmware guarantee matrix: real-seam chain (both slots) + patched-LK unlock legs + BROM belt + seam ledger; `--json`, `--trace-diff UART_LOG` | yes (full) · `--help` Tier 1 |
+ 
+ All CLIs are thin argparse wrappers over package APIs; binary resolution
+ is lazy (call time), so `--help` never needs vendor bins and a missing
+ image prints the provenance pointer instead of a traceback.
+ 
+ ## Layout
+ 
+ ```
+ crumpet_emu/            the package
+ ├── core/               Session, device stubs, checkpoint save/restore
+@@ -91,20 +92,22 @@ crumpet_emu/            the package
+ ├── usb/                MUSB MAC model, CDC device, transports, FastbootHost
+ ├── deploy/             the closed-loop §7.4 deployment pipeline (backup → slot → verified writes)
+ └── hunting/            injection, differential, crash-tolerant fuzz loop, edge coverage
+ scenarios/              thin CLIs (one per layer + differential/fuzz)
+ tests/                  ported donor suite + core/LK/hunting tests (tier-gated)
+ binaries/               manifest + committed own artifacts; vendor/ is gitignored (parked)
+ docs/                   architecture, hunting guide, provenance, porting notes
+ tools/                  patched-LK patch derivation/verification (IDA-derived patch set)
+ ```
+ 
++Guarantee: [`docs/guarantee.md`](docs/guarantee.md) — what the emulator proves about the amonet-koboreru chain on real silicon, the seam fidelity matrix, and the irreducible hardware-risk register.
++
+ Docs: [`docs/architecture.md`](docs/architecture.md) (layers, entry
+ points, memory maps, import map) ·
+ [`docs/hunting.md`](docs/hunting.md) (checkpoints, injection recipes,
+ differential, fuzzing, coverage, review-focus behaviors) ·
+ [`docs/provenance.md`](docs/provenance.md) (every binary: origin, hash,
+ classification, upstream attribution) ·
+ [`docs/porting-notes.md`](docs/porting-notes.md) (deltas vs donors,
+ seams, ruling ledger).
+ 
+ ## Status and roadmap
+diff --git a/crumpet_emu/lk/customfw.py b/crumpet_emu/lk/customfw.py
+new file mode 100644
+index 0000000..d584623
+--- /dev/null
++++ b/crumpet_emu/lk/customfw.py
+@@ -0,0 +1,123 @@
++"""Patched-LK execution legs for the custom-firmware guarantee
++(guarantee plan Task 6).
++
++The patched LK (2021:lk-patched = the pinned 2025 stock donor + the
++three derive_lk_patches sites) EXECUTES as real code:
++
++- ``lock_gate_differential`` — the real cmd_lock_check (0x41E0EF18) at
++  its dispatcher call-site shape (r0 = command line, bl @0x41E1E1FC):
++  stock restricts 'flash:…' on a locked device, the patched gate returns
++  allowed (0) unconditionally.
++- ``verify_and_vb_differential`` — the real boot_image_verify_and_vb
++  (0x41E11548(start, size)) on an unsigned custom boot image: stock runs
++  the RED block (log 'Image FAILED AUTHENTICATION…', vbstate 3, ret
++  -0xD); the patched RED-abort branch (0x41E1158C cbnz -> b) skips to
++  the publish path (0x41E115AE+) and never writes RED.
++- ``patched_getvar`` — FastbootHost getvar through the real getvar
++  handler on patched bytes (dispatcher plumbing).
++
++Known surgical ceilings (documented in docs/guarantee.md): the publish
++path deeper than its first stages needs natural-boot state (M2 class),
++and the fastboot flash WRITE path needs LK's boot-built partition table
+++ mmc stack — the operator's actual flash routes (Linux-root dd, and
++mtkclient via the DA-patched preloader USBDL) are covered by the deploy
++pipeline against the emulated chip instead.
++"""
++from crumpet_emu import resources
++from crumpet_emu.lk.session import LkSession
++
++LOCK_GATE = 0x41E0EF18          # cmd_lock_check (patch site 1)
++VBWARN = 0x41E114B0             # vbstate warning (patch site 2)
++RED_ABORT = 0x41E1158C          # RED-abort branch (patch site 3)
++RED_BLOCK = 0x41E1158E          # first PC inside the RED block
++PUBLISH = 0x41E115AE            # the RED-abort branch target
++VERIFY_AND_VB = 0x41E11548      # boot_image_verify_and_vb
++# vbstate cell: *(0x41E38D10) -> vbstate ptr (double-deref chain from
++# the function's own pc-relative pool: ldr r4,[pc,#0x164] @0x41E1154E,
++# add r4,pc @0x41E11562 -> cell 0x41E38D10; ldr r4,[r4] -> vbstate ptr)
++VBSTATE_CELL = 0x41E38D10
++
++
++def _stock():
++    return resources.resolve('lk', '2025').read_bytes()
++
++
++def _patched():
++    return resources.resolve('lk-patched', '2021').read_bytes()
++
++
++def lock_gate_differential(cmd: bytes = b'flash:boot') -> dict:
++    """Real cmd_lock_check on stock vs patched bytes."""
++    out = {}
++    for which, img in (('stock', _stock()), ('patched', _patched())):
++        lk = LkSession(img, verbose=False)
++        p = 0x41E40000
++        lk.wr(p, cmd + b'\x00')
++        out[which] = lk.call(LOCK_GATE, [p]) & 0xFFFFFFFF
++        # 1 = restricted (locked blocklist), 0 = allowed
++    return out
++
++
++def _vbstate(lk: LkSession, img: bytes) -> int:
++    ptr = struct_unpack(lk, VBSTATE_CELL, 4)
++    return struct_unpack(lk, ptr, 4)
++
++
++def struct_unpack(lk: LkSession, addr: int, n: int) -> int:
++    import struct
++    raw = bytes(lk.uc.mem_read(addr, n))
++    return struct.unpack('<I', raw)[0]
++
++
++def verify_and_vb_differential(custom_boot: bytes, *,
++                               trace_hi: int = 0x41E116C0) -> dict:
++    """Real verify_and_vb on an unsigned custom boot image, both LKs.
++
++    The image is staged at BOOT_IMAGE_BASE with size = len - 0x800
++    (the natural-boot caller's value: the signature page is excluded,
++    cert_driver parses the DER at end). A PC trace records the RED/publish
++    branch decision; vbstate is read from the guest double-deref cell.
++    """
++    from crumpet_emu.lk.bootimg import BOOT_IMAGE_BASE
++    from unicorn import UC_HOOK_CODE
++    size = len(custom_boot) - 0x800
++    out = {}
++    for which, img in (('stock', _stock()), ('patched', _patched())):
++        lk = LkSession(img, verbose=False)
++        start = BOOT_IMAGE_BASE
++        try:
++            lk.uc.mem_read(start, 16)
++        except Exception:
++            lk.uc.mem_map(start, ((len(custom_boot) + 0xFFF) & ~0xFFF)
++                          + 0x1000)
++        lk.wr(start, custom_boot)
++        pcs: list = []
++
++        def hk(uc, address, s_, user, _pcs=pcs):
++            if VERIFY_AND_VB <= address <= trace_hi:
++                if not _pcs or _pcs[-1] != address:
++                    _pcs.append(address)
++
++        h = lk.uc.hook_add(UC_HOOK_CODE, hk)
++        log0 = len(lk.log_out)
++        try:
++            ret = lk.call(VERIFY_AND_VB, [start, size])
++            ret = ret - 0x100000000 if ret and ret >= 0x80000000 else ret
++        except Exception:
++            ret = None
++        finally:
++            lk.uc.hook_del(h)
++        out[which] = {
++            'ret': ret,
++            'pcs': pcs,
++            'logs': lk.log_out[log0:],
++            'vbstate': _vbstate(lk, img),
++        }
++    return out
++
++
++def patched_getvar(name: str = 'version'):
++    """getvar:<name> through the real getvar handler on patched bytes."""
++    from crumpet_emu.usb.fastboot import FastbootHost
++    lk = LkSession(_patched(), verbose=False)
++    return FastbootHost(lk).getvar(name)
+diff --git a/crumpet_emu/preloader/constants.py b/crumpet_emu/preloader/constants.py
+index e5323ac..c0fea1c 100644
+--- a/crumpet_emu/preloader/constants.py
++++ b/crumpet_emu/preloader/constants.py
+@@ -29,31 +29,38 @@ USB_HANDSHAKE = 0x20D7DC
+ TEE_SET_ENTRY = 0x2160A8
+ MTEE_VERIFY = 0x216140
+ SECMEM_REARM = 0x216170       # sub_216170: secmem bookkeeping (called by part_load)
+ VERIFY_LK = 0x201D70          # RSA-2048 verify ("VERIFY_LK")
+ PRINTF = 0x2110F4
+ MEMCPY = 0x215B70
+ ASSERT = 0x21082C
+ TIMER_GET = 0x215C5C
+ HDR_PARSE = 0x20F2D8          # sequential sub-image header parse from ctx
+ OVERLAP_CHK = 0x20F398        # check_part_overlapped (name table @0x224910)
++OVERLAP_NAME_TABLE = 0x224910 # {lk, lk_a, lk_b, uboot} ptrs, in-file relocated
++LK_REGION = OVERLAP_NAME_TABLE + 0x10  # claimed-range global, in-file {0,0}
+ BDEV = 0x1086EC
+ BDEV_READ = BDEV + 0x20       # 0x10870C
+ HEAD_CELL = 0x102188
+ BSS_START = 0x102180
+ PAYLOAD_ADDR = 0x101000
+ DRAM_BUF = 0x42000000
+ BOUNCE = DRAM_BUF + 0x56800
+ CTX_HDR = DRAM_BUF + 0x666F0  # v10 in part_load
+ LK_LOAD_ADDR = 0x41E00000
+ TEE_LOAD_ADDR = 0x43001000
+ SRAM_DBUF_PTR = 0x102994
++# part_get staging (guarantee Task 3; layout from the sub_20F1F8 disasm)
++PART_TABLE = DRAM_BUF + 0x69244  # entry table at *(*(0x22518C)) + 0x69244
++PART_TABLE_NAMES = DRAM_BUF + 0x69400  # staged name strings (scratch)
++PART_GET_OUT = 0x102A5C        # the walk's global output struct (.bss)
++PART_GET_NAMEBUF = 0x102A70    # part_get's 0x20-B input-name copy (.bss)
+ 
+ # GPT (4096-byte LBAs) from brhgptpl_0.img -> bdev start blocks (512B units)
+ # lk_b added (crumpet kamakiri task 9): start 640 LBA4096 directly after
+ # lk_a's 384-LBA span, from the real GPT (emu/gpt.py parse). Appended at the
+ # END so every existing scenario's part_get scratch indices are unchanged.
+ # The dict itself is owned by crumpet_emu.flash.image (Task 5); re-exported
+ # at the top of this module.
+ BLKSZ = 0x200
+ 
+ # Unicorn-placed regions
+diff --git a/crumpet_emu/preloader/emu.py b/crumpet_emu/preloader/emu.py
+index c5be5b8..324954a 100644
+--- a/crumpet_emu/preloader/emu.py
++++ b/crumpet_emu/preloader/emu.py
+@@ -35,22 +35,25 @@ from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
+                                UC_ARM_REG_R6, UC_ARM_REG_R7, UC_ARM_REG_R8,
+                                UC_ARM_REG_R9, UC_ARM_REG_R10, UC_ARM_REG_R11,
+                                UC_ARM_REG_R12, UC_ARM_REG_SP, UC_ARM_REG_LR,
+                                UC_ARM_REG_PC)
+ 
+ from crumpet_emu import resources
+ from crumpet_emu.flash.image import GPT
+ from crumpet_emu.preloader.constants import (ASSERT, BDEV, BDEV_INIT, BDEV_READ,
+                                              BLKSZ, BOUNCE, DRAM_BUF, EFUSE_SBC,
+                                              FILE_DELTA, HDR_PARSE,
+-                                             HEAD_CELL, MAGIC_RET, MTEE_VERIFY,
++                                             HEAD_CELL, LK_REGION, MAGIC_RET,
++                                             MTEE_VERIFY,
+                                              MEMCPY, OVERLAP_CHK, PART_GET,
++                                             PART_GET_NAMEBUF, PART_GET_OUT,
++                                             PART_TABLE, PART_TABLE_NAMES,
+                                              PART_LOAD, PRINTF, SCRATCH,
+                                              SECMEM_REARM, SRAM_DBUF_PTR,
+                                              STACK, TEE_SET_ENTRY, TEXT_BASE,
+                                              TIMER_GET, TRAMP, UART_LSR,
+                                              UART_THR, USB_HANDSHAKE, VERIFY_LK)
+ 
+ 
+ def PL_IMG():
+     """Default preloader image (donor line 39 module Path -> lazy resolve)."""
+     return resources.resolve('brhgptpl_0', '2021')
+@@ -146,22 +149,25 @@ def fmt_stub(uc, r0, r1, r2, r3, sp):
+                 out += hex(args[ai] & 0xFFFFFFFF); ai += 1; i += 2; continue
+             if n == '%':
+                 out += '%'; i += 2; continue
+         out += c
+         i += 1
+     return out
+ 
+ 
+ class Emu:
+     def __init__(self, flash, sbc=True, log=sys.stdout, payload_syms=None,
+-                 stock_ok=None):
++                 stock_ok=None, legacy_seams=False):
+         self.f, self.sbc, self.log = flash, sbc, log
++        self.legacy_seams = legacy_seams  # guarantee Task 2: True = donor's
++        # reimplemented hdr-parse/overlap stubs; False (default) = REAL
++        # sub_20F2D8/sub_20F398 execute, hooks observe only.
+         self.payload_syms = payload_syms or {}
+         self.stock_ok = stock_ok  # genuine stock image bytes: RSA passes for these
+         self.timer = 0
+         self.events = []          # oracle log
+         self.verify_calls = 0
+         self.lk_region = (0, 0)   # check_part_overlapped claim state
+         self.cur_offset = 0       # sub-image offset of the current part_load call
+         self.last_hdr = None      # parsed header of current sub-image
+         self.current_part = None  # name of part struct most recently returned
+         self.stopped = False
+@@ -171,44 +177,77 @@ class Emu:
+ 
+         uc.mem_map(0x0, 0x140000)            # SRAM0 + trampoline/stack block
+         uc.mem_map(0x200000, 0x40000)        # preloader text/rodata
+         uc.mem_map(0x10000000, 0x10000)      # low MMIO (efuse/wdt/timer)
+         uc.mem_map(0x11005000, 0x1000)       # UART
+         uc.mem_map(0x41D00000, 0x1000000)    # LK + dram_buf region
+         uc.mem_map(0x600000, 0x400000)       # MTEE OS region (donor tee maddr)
+         uc.mem_map(0x43000000, 0x100000)     # TEE
+ 
+         pl = PL_IMG().read_bytes()
++        self.pl_img = pl                 # hostcrypto_pl key source (Task 5)
+         text = pl[TEXT_BASE - FILE_DELTA: TEXT_BASE - FILE_DELTA + 0x3D000]
+         uc.mem_write(0x201000, text)
+         uc.mem_write(TRAMP, struct.pack('<HH', 0xDEFE, 0xDEFE))  # udf #imm
+ 
+         # G pointer used by part_load (resolved from its literal pool)
+         g_addr = self.resolve_g()
+         uc.mem_write(g_addr, struct.pack('<I', DRAM_BUF))
+ 
+         uc.hook_add(UC_HOOK_CODE, self.hook_code)
+         uc.hook_add(UC_HOOK_MEM_INVALID, self.hook_mem_invalid)
+         uc.hook_add(UC_HOOK_MEM_WRITE, self.hook_uart_write, begin=UART_THR, end=UART_THR + 3)
+ 
+         # UART LSR always "THR empty" so payload printf never blocks
+         uc.mem_write(UART_LSR, struct.pack('<I', 0x20))
+         # SBC eFuse bit (bit 1 of 0x10009060) per scenario
+         uc.mem_write(EFUSE_SBC, struct.pack('<I', 2 if sbc else 0))
+ 
++        if not legacy_seams:
++            self._stage_part_table()
++
+         # payload-internal timer helpers (polled MMIO would never advance)
+         for sym in ('mdelay', 'udelay', 'gpt4_get_current_tick',
+                     'gpt4_tick2time_ms'):
+             a = self.payload_syms.get(sym)
+             if a:
+                 self.timer_stubs = getattr(self, 'timer_stubs', set()) | {a}
+ 
++    def _stage_part_table(self):
++        """Stage the preloader partition table for the REAL part_get walk
++        (guarantee Task 3). Layout from the sub_20F1F8 disasm: entries of
++        0x14 bytes at *(*(0x22518C)) + 0x69244 — the double deref resolves
++        to *SRAM_DBUF_PTR (0x102994) = DRAM_BUF, i.e. DRAM_BUF+0x69244;
++        entry = {start@0, nblk@4 (0 terminates the table), ?@8, ?@0xC,
++        name* @0x10}; matched entries are copied by the real walk to its
++        global struct (PART_GET_OUT 0x102A5C) with the name copied to
++        PART_GET_NAMEBUF-adjacent buffers. Entry values come from the REAL
++        GPT (crumpet_emu.flash.gpt on the pinned 2021:brhgptpl_0), the
++        same source the donor stub's GPT dict was derived from — the boot-
++        time table build (real part_init over the flash GPT) is the staged
++        state, LK-platform.py boot-state precedent.
++        """
++        from crumpet_emu.flash.gpt import parse_gpt_from_image
++        uc = self.uc
++        uc.mem_write(SRAM_DBUF_PTR, struct.pack('<I', DRAM_BUF))
++        gpt = parse_gpt_from_image(PL_IMG().read_bytes())
++        off = 0
++        for i, (name, (start_lba, cnt_lba)) in enumerate(gpt.items()):
++            namep = PART_TABLE_NAMES + 0x40 * i
++            uc.mem_write(namep, name.encode() + b'\x00')
++            # GPT LBA4096 units -> bdev 512-block units (donor GPT dict rule)
++            entry = struct.pack('<IIIII', start_lba * 8, cnt_lba * 8,
++                                0, 0, namep)
++            uc.mem_write(PART_TABLE + off, entry)
++            off += 0x14
++        uc.mem_write(PART_TABLE + off, struct.pack('<IIIII', 0, 0, 0, 0, 0))
++
+     def hook_uart_write(self, uc, access, address, size, value, user):
+         if address == UART_THR:
+             self.log.write(chr(value & 0xFF))
+             self.log.flush()
+         return True
+ 
+     def resolve_g(self):
+         # part_load entry: LDR R7,=lit ; ... find 'LDR.W R7, [R7]' pattern via
+         # literal: disassemble-free approach -- the pool value at 0x20F6F4.
+         lit = rd32(PL_IMG().read_bytes(), 0x20F6F4 - FILE_DELTA)
+@@ -276,67 +315,80 @@ class Emu:
+                         f'r1={hex(regs[UC_ARM_REG_R1])} r2={hex(regs[UC_ARM_REG_R2])} '
+                         f'r3={hex(regs[UC_ARM_REG_R3])}>')
+             self.log.write('[PL@%s] ' % hex(regs[UC_ARM_REG_LR]) + line)
+             self.log.flush()
+             self.pl_log.append(line)
+             uc.reg_write(UC_ARM_REG_R0, 0)
+             uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
+             return
+ 
+         if address == VERIFY_LK:
+-            # RSA oracle: r0 = image address, r1 = size (per gate call site
+-            # 0x20F6C4: sub_201D70(load_addr, size, 0, ...)). The genuine
+-            # stock image passes; anything else (patched/custom) fails.
++            # REAL host-side RSA-2048/PSS against the Amazon LK modulus
++            # embedded in the pinned preloader (guarantee Task 5; recipe =
++            # sub_201D70 per preloader-vuln-signature.md §3.1). Replaces the
++            # stock-bytes-equality oracle: any genuinely Amazon-signed image
++            # passes (silicon truth), everything else fails.
+             img, size = regs[UC_ARM_REG_R0], regs[UC_ARM_REG_R1]
+             data = bytes(uc.mem_read(img, size)) if size else b''
+-            # the loaded image is the sub-image DATA (file bytes after the
+-            # 512-byte partition header)
+-            if self.stock_ok and data == self.stock_ok[0x200:0x200 + size]:
+-                self.verify_calls += 1
+-                self.events.append('RSA_VERIFY: stock image -> PASS (prod key)')
++            from crumpet_emu.preloader.hostcrypto_pl import verify_lk_signature
++            self.verify_calls += 1
++            try:
++                ok = verify_lk_signature(data, self.pl_img)
++            except ValueError as ex:
++                self.events.append(f'RSA_VERIFY[real-rsa] key error: {ex}')
++                ok = False
++            if ok:
++                self.events.append('RSA_VERIFY[real-rsa]: Amazon-signed -> PASS')
+                 uc.reg_write(UC_ARM_REG_R0, 0)
+             else:
+-                self.verify_calls += 1
+-                self.events.append('RSA_VERIFY_CALLED on unsigned image -> FAIL')
++                self.events.append(
++                    'RSA_VERIFY[real-rsa] on unsigned image -> FAIL')
+                 uc.reg_write(UC_ARM_REG_R0, 0xFFFFFFFF)
+             uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
+             return
+ 
+         if address == USB_HANDSHAKE:
+             self.events.append('!!! ENTERED USBDL HANDSHAKE -> while(1) HANG (brick)')
+             self.stopped = True
+             uc.emu_stop()
+             return
+ 
+         if address == ASSERT:
+             self.events.append(f'!!! ASSERT/panic at caller '
+                                f'{hex(regs[UC_ARM_REG_LR])} -> boot halt')
+             self.stopped = True
+             uc.emu_stop()
+             return
+ 
+         if address == PART_GET:
++            if self.legacy_seams:
++                name = uc_cstr(uc, regs[UC_ARM_REG_R0], 32)
++                self.current_part = name
++                if name not in GPT:
++                    uc.reg_write(UC_ARM_REG_R0, 0)
++                else:
++                    start, nblk = GPT[name]
++                    idx = list(GPT).index(name)
++                    p = SCRATCH + 0x100 * (idx + 1)
++                    namep = SCRATCH + 0x400 + 0x40 * idx
++                    uc.mem_write(namep, name.encode() + b'\x00')
++                    blob = struct.pack('<II', start, nblk) + b'\x00' * 8 + \
++                        struct.pack('<I', namep) + b'\x00' * 0x2C
++                    uc.mem_write(p, blob)
++                    uc.reg_write(UC_ARM_REG_R0, p)
++                uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
++                return
++            # guarantee Task 3: REAL sub_20F250 + the sub_20F1F8 walk
++            # execute against the staged real-GPT table; observe only.
+             name = uc_cstr(uc, regs[UC_ARM_REG_R0], 32)
+             self.current_part = name
+-            if name not in GPT:
+-                uc.reg_write(UC_ARM_REG_R0, 0)
+-            else:
+-                start, nblk = GPT[name]
+-                idx = list(GPT).index(name)
+-                p = SCRATCH + 0x100 * (idx + 1)
+-                namep = SCRATCH + 0x400 + 0x40 * idx
+-                uc.mem_write(namep, name.encode() + b'\x00')
+-                blob = struct.pack('<II', start, nblk) + b'\x00' * 8 + \
+-                    struct.pack('<I', namep) + b'\x00' * 0x2C
+-                uc.mem_write(p, blob)
+-                uc.reg_write(UC_ARM_REG_R0, p)
+-            uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
++            self.events.append(f'part_get[real]({name!r})')
+             return
+ 
+         if address == BDEV_INIT:
+             # re-arm the block device (what the real boot_device_init does to
+             # the struct fields we care about)
+             uc.mem_write(HEAD_CELL, struct.pack('<I', BDEV))
+             uc.mem_write(BDEV + 0x00, struct.pack('<I', 0))          # id
+             uc.mem_write(BDEV + 0x04, struct.pack('<I', BLKSZ))     # blksize
+             uc.mem_write(BDEV + 0x14, struct.pack('<I', BOUNCE))
+             uc.mem_write(BDEV + 0x1C, struct.pack('<I', 0))          # next
+@@ -351,66 +403,88 @@ class Emu:
+             part = regs[UC_ARM_REG_R1]
+             namep = rd32(bytes(uc.mem_read(part + 0x10, 4)), 0)
+             name = uc_cstr(uc, namep, 32)
+             self.cur_offset = regs[UC_ARM_REG_R3]
+             self.reads = []   # reads issued by this part_load invocation
+             self.events.append(f'part_load(part={name!r}, off={hex(self.cur_offset)}, '
+                                f'addr_cell={hex(regs[UC_ARM_REG_R2])})')
+             return
+ 
+         if address == HDR_PARSE:
+-            # parse the part_hdr from the buffer the header read landed in
+-            # (direct dst buffer; sub-image start is 512-aligned on this bdev)
+-            hdst = self.reads[0][0] if self.reads else BOUNCE
+-            intra = self.cur_offset & (BLKSZ - 1)
+-            hdr = bytes(uc.mem_read(hdst + intra, 0x200))
++            if self.legacy_seams:
++                # parse the part_hdr from the buffer the header read landed in
++                # (direct dst buffer; sub-image start is 512-aligned on this bdev)
++                hdst = self.reads[0][0] if self.reads else BOUNCE
++                intra = self.cur_offset & (BLKSZ - 1)
++                hdr = bytes(uc.mem_read(hdst + intra, 0x200))
++                magic, dsize = struct.unpack_from('<II', hdr, 0)
++                name = hdr[8:40].split(b'\x00')[0]
++                maddr, mode = struct.unpack_from('<II', hdr, 40)
++                self.last_hdr = (magic, dsize, name, maddr, mode)
++                maddr_p, size_p = regs[UC_ARM_REG_R1], regs[UC_ARM_REG_R2]
++                uc.mem_write(maddr_p, struct.pack('<II', maddr, mode))
++                uc.mem_write(size_p, struct.pack('<I', dsize))
++                if magic != 0x58881688:
++                    self.events.append(f'HDR BAD MAGIC {hex(magic)} -> parse error')
++                    uc.reg_write(UC_ARM_REG_R0, 0xFFFFFFFF)
++                else:
++                    self.events.append(f'HDR name={name!r} dsize={hex(dsize)} '
++                                       f'maddr={hex(maddr)} mode={mode}')
++                    uc.reg_write(UC_ARM_REG_R0, 0)
++                uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
++                return
++            # guarantee Task 2: REAL sub_20F2D8 executes; observe its ctx
++            # inputs only (last_hdr mirror kept for CAL-2-style asserts)
++            hdr = bytes(uc.mem_read(regs[UC_ARM_REG_R0], 0x30))
+             magic, dsize = struct.unpack_from('<II', hdr, 0)
+             name = hdr[8:40].split(b'\x00')[0]
+             maddr, mode = struct.unpack_from('<II', hdr, 40)
+             self.last_hdr = (magic, dsize, name, maddr, mode)
+-            maddr_p, size_p = regs[UC_ARM_REG_R1], regs[UC_ARM_REG_R2]
+-            uc.mem_write(maddr_p, struct.pack('<II', maddr, mode))
+-            uc.mem_write(size_p, struct.pack('<I', dsize))
+-            if magic != 0x58881688:
+-                self.events.append(f'HDR BAD MAGIC {hex(magic)} -> parse error')
+-                uc.reg_write(UC_ARM_REG_R0, 0xFFFFFFFF)
+-            else:
+-                self.events.append(f'HDR name={name!r} dsize={hex(dsize)} '
+-                                   f'maddr={hex(maddr)} mode={mode}')
+-                uc.reg_write(UC_ARM_REG_R0, 0)
+-            uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
++            self.events.append(f'HDR[real] name={name!r} dsize={hex(dsize)} '
++                               f'maddr={hex(maddr)} mode={hex(mode)}')
+             return
+ 
+         if address == OVERLAP_CHK:
+-            # faithful replication of check_part_overlapped (README semantics,
+-            # name table at 0x224910 == {lk, lk_a, lk_b, uboot})
+-            load_addr = regs[UC_ARM_REG_R1]
+-            magic, dsize, name, maddr, mode = self.last_hdr
+-            NAMES = (b'lk', b'lk_a', b'lk_b', b'uboot')
+-            if name in NAMES:
+-                self.lk_region = (load_addr, load_addr + dsize - 1)
+-                self.events.append(f'  overlap: {name!r} claims '
+-                                   f'{hex(load_addr)}-{hex(load_addr + dsize - 1)}, '
+-                                   f'return OK (no overlap check)')
+-                uc.reg_write(UC_ARM_REG_R0, 0)
+-            else:
+-                s, e = load_addr, load_addr + dsize - 1
+-                rs, re_ = self.lk_region
+-                if not (e < rs or s > re_):
+-                    self.events.append(f'  !!! overlap assert (239): range '
+-                                       f'{hex(s)}-{hex(e)} vs lk_region '
+-                                       f'{hex(rs)}-{hex(re_)} -> panic')
+-                    uc.reg_write(UC_ARM_REG_R0, 0xFFFFFFFF)
+-                else:
+-                    self.events.append(f'  overlap: {name!r} {hex(s)}-{hex(e)} OK')
++            if self.legacy_seams:
++                # faithful replication of check_part_overlapped (README semantics,
++                # name table at 0x224910 == {lk, lk_a, lk_b, uboot})
++                load_addr = regs[UC_ARM_REG_R1]
++                magic, dsize, name, maddr, mode = self.last_hdr
++                NAMES = (b'lk', b'lk_a', b'lk_b', b'uboot')
++                if name in NAMES:
++                    self.lk_region = (load_addr, load_addr + dsize - 1)
++                    self.events.append(f'  overlap: {name!r} claims '
++                                       f'{hex(load_addr)}-{hex(load_addr + dsize - 1)}, '
++                                       f'return OK (no overlap check)')
+                     uc.reg_write(UC_ARM_REG_R0, 0)
+-            uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
++                else:
++                    s, e = load_addr, load_addr + dsize - 1
++                    rs, re_ = self.lk_region
++                    if not (e < rs or s > re_):
++                        self.events.append(f'  !!! overlap assert (239): range '
++                                           f'{hex(s)}-{hex(e)} vs lk_region '
++                                           f'{hex(rs)}-{hex(re_)} -> panic')
++                        uc.reg_write(UC_ARM_REG_R0, 0xFFFFFFFF)
++                    else:
++                        self.events.append(f'  overlap: {name!r} {hex(s)}-{hex(e)} OK')
++                        uc.reg_write(UC_ARM_REG_R0, 0)
++                uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
++                return
++            # guarantee Task 2: REAL check_part_overlapped executes; observe
++            # only — claim state lives in the guest cells at name-table+0x10
++            # (in-file init {0,0}); see guest_lk_region().
++            hdrp = regs[UC_ARM_REG_R0]
++            start = regs[UC_ARM_REG_R1]
++            dsize, = struct.unpack('<I', bytes(uc.mem_read(hdrp + 4, 4)))
++            name = bytes(uc.mem_read(hdrp + 8, 32)).split(b'\x00')[0]
++            self.events.append(f'  overlap[real]: name={name!r} start={hex(start)} '
++                               f'end={hex(start + dsize - 1)}')
+             return
+ 
+         if address == 0x20192C:      # ARB fuse-version read (efuse clz decode)
+             uc.reg_write(UC_ARM_REG_R0, getattr(self, 'fuse_ver', 1))
+             uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
+             return
+         if address in (0x21A560, 0x201EE8):  # TEE / LK version stamp getters
+             uc.reg_write(UC_ARM_REG_R0, 1)   # stock 2021 set is internally 1
+             uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
+             return
+@@ -445,20 +519,25 @@ class Emu:
+                 uc.mem_write(dst, bytes(data))
+             uc.reg_write(UC_ARM_REG_R0, dst)
+             uc.reg_write(UC_ARM_REG_PC, regs[UC_ARM_REG_LR] | 1)
+             return
+ 
+         if address == MAGIC_RET:
+             uc.emu_stop()
+             return
+ 
+     # ---------------- drivers ----------------
++    def guest_lk_region(self):
++        """REAL check_part_overlapped claim state (guest cells at
++        name-table+0x10; in-file init {0,0} — README semantics)."""
++        return struct.unpack('<II', bytes(self.uc.mem_read(LK_REGION, 8)))
++
+     def call(self, addr, args=(), timeout=0, count=0):
+         uc = self.uc
+         sp = STACK - 0x200
+         extra = list(args[4:])
+         for i, v in enumerate(reversed(extra)):
+             sp -= 4
+             uc.mem_write(sp, struct.pack('<I', v))
+         uc.reg_write(UC_ARM_REG_SP, sp)
+         uc.reg_write(UC_ARM_REG_LR, MAGIC_RET)
+         for i, v in enumerate(args[:4]):
+diff --git a/crumpet_emu/preloader/hostcrypto_pl.py b/crumpet_emu/preloader/hostcrypto_pl.py
+new file mode 100644
+index 0000000..93dcfa9
+--- /dev/null
++++ b/crumpet_emu/preloader/hostcrypto_pl.py
+@@ -0,0 +1,66 @@
++"""Host-side REAL RSA-2048/PSS verification for the preloader LK gate
++(guarantee Task 5).
++
++Recipe = the real verify_lk (sub_201D70) semantics, per
++WS/recovery-notes/preloader-vuln-signature.md §3.1 (IDA-reconstructed):
++data_len = total_size - 0x100, signature = last 0x100 bytes, RSA public
++operation with the Amazon LK modulus embedded in the preloader at VMA
++0x22244C (file offset 0x02974C, 256 B big-endian, e = 65537), SHA-256
++over the signed data, PSS decode with salt length 0x20 and a 0x800-bit
++modulus (embits 2047). The end-to-end cross-check is the stock lk
++sub-image itself: a wrong key cannot verify Amazon's genuine signature
++(pinned by tests/test_pl_hostcrypto.py).
++"""
++import hashlib
++
++from crumpet_emu.lk.hostcrypto import b2i, i2b, pss_encode
++
++KEY_VMA = 0x00222260                      # from sub_201D70's own pool
++KEY_FILE_OFF = 0x029560                 # KEY_VMA - FILE_DELTA
++# NOTE: recovery-notes/preloader-vuln-signature.md §2 records VMA
++# 0x22244C / file 0x2974C — WRONG for the pinned NS6548 2021 image (the
++# bytes there are a pointer table). The verifier's own pc-relative pool
++# (ldr r1,[pc,#0x100] @0x201DA0 + add r1,pc) resolves to 0x222260, where
++# the recorded modulus fingerprint lives. Guarantee Task 5 finding.
++KEY_SHA256 = ('9824ee73c71c4433ba550e4aef304ca5'
++              '9046ea9bf7f3817a506456cce6940203')   # recorded fingerprint
++E = 65537                               # preloader verify-key exponent
++SIG_LEN = 0x100
++SALT_LEN = 0x20
++EMBITS = 2047                           # modulus_bitlen 0x800 - 1
++
++
++def load_lk_modulus(pl_bytes: bytes) -> int:
++    """Extract + fingerprint-check the embedded LK verify modulus."""
++    n_b = pl_bytes[KEY_FILE_OFF:KEY_FILE_OFF + 0x100]
++    if len(n_b) != 0x100:
++        raise ValueError('short preloader image: no LK modulus')
++    if hashlib.sha256(n_b).hexdigest() != KEY_SHA256:
++        raise ValueError('LK modulus fingerprint mismatch — not the '
++                         'pinned NS6548 2021 preloader?')
++    return b2i(n_b)
++
++
++def verify_lk_signature(image: bytes, pl_bytes: bytes) -> bool:
++    """True iff the image carries a genuine Amazon LK signature (the
++    silicon verdict for sub_201D70). Anything unsigned or tampered —
++    including lk-patched — is False."""
++    if len(image) <= SIG_LEN:
++        return False
++    n = load_lk_modulus(pl_bytes)
++    data, sig = image[:-SIG_LEN], image[-SIG_LEN:]
++    em = i2b(pow(b2i(sig), E, n), SIG_LEN)
++    if em[-1] != 0xBC:
++        return False
++    # libtomcrypt pkcs_1_pss_decode: em = maskedDB(emLen-hLen-1) || H || bc
++    from crumpet_emu.lk.hostcrypto import mgf1
++    h_len = 32
++    db_len = SIG_LEN - h_len - 1
++    masked_db, h = em[:db_len], em[db_len:db_len + h_len]
++    db = bytes(a ^ b for a, b in zip(masked_db, mgf1(h, db_len)))
++    db = bytes([db[0] & 0x7F]) + db[1:]      # embits 2047: clear top bit
++    ps_len = db_len - SALT_LEN - 1
++    if db[ps_len] != 0x01 or any(db[:ps_len]):
++        return False
++    salt = db[db_len - SALT_LEN:]
++    return pss_encode(data, salt, EMBITS) == em
+diff --git a/crumpet_emu/preloader/seams.py b/crumpet_emu/preloader/seams.py
+new file mode 100644
+index 0000000..ecbabdb
+--- /dev/null
++++ b/crumpet_emu/preloader/seams.py
+@@ -0,0 +1,124 @@
++"""Seam inventory for the amonet chain (guarantee plan Task 1).
++
++One row per address `Emu.hook_code` intercepts on the amonet-koboreru
++crumpet2021 chain, with an honest classification and a citation. The
++ledger test (`tests/test_seam_ledger.py`) cross-checks every VMA against
++`crumpet_emu.preloader.constants`, so code and ledger cannot drift.
++
++Kinds:
++  real                the vendor code at the VMA executes (hook observes)
++  staged              vendor code executes against staged state, or true
++                      I/O is served host-side at a boundary the real code
++                      calls through (pointer indirection itself is real)
++  oracle-conservative the seam MODELS a silicon outcome in the direction
++                      that can only make the emu MORE pessimistic than
++                      silicon for the chain verdict (fail/halt/verify-fail)
++  reimplemented       host code replaces a real vendor function whose
++                      semantics matter to the chain verdict — upgrade
++                      target (see SEAM_CHAIN_CRITICAL)
++  stub                side effect skipped or identity-returned; recorded
++                      non-load-bearing for the chain verdict with the
++                      reason
++
++Chain-critical seams (plan: hdr_parse, overlap_chk, part_get) must not
++remain 'reimplemented'; the ledger test is the forcing function.
++"""
++from collections import namedtuple
++
++Seam = namedtuple('Seam', 'vma kind citation')
++
++KINDS = ('real', 'staged', 'oracle-conservative', 'reimplemented',
++         'stub', 'real-crypto-host')
++
++SEAM_CHAIN_CRITICAL = frozenset({'hdr_parse', 'overlap_chk', 'part_get'})
++
++SEAMS = {
++    'hdr_parse': Seam(0x20F2D8, 'real',
++                      'REAL sub_20F2D8 executes (guarantee Task 2); the hook '
++                      'only mirrors its ctx into last_hdr. Donor host-parser '
++                      'reimplementation kept behind legacy_seams=True '
++                      '(tests/test_real_parse_overlap.py differential)'),
++    'overlap_chk': Seam(0x20F398, 'real',
++                        'REAL check_part_overlapped executes (guarantee Task '
++                        '2); claim state = guest cells at name-table+0x10 '
++                        '(0x224920, in-file {0,0}); legacy host replication '
++                        'behind legacy_seams=True'),
++    'part_get': Seam(0x20F250, 'real',
++                     'REAL sub_20F250 + sub_20F1F8 walk execute against the '
++                     'staged real-GPT entry table at *SRAM_DBUF_PTR+0x69244 '
++                     '(guarantee Task 3); donor synthesized struct behind '
++                     'legacy_seams=True'),
++    'bdev_init': Seam(0x212EFC, 'staged',
++                      'host re-arm of the bdev struct replaces sub_212EFC '
++                      'boot_device_init. DECODED (guarantee Task 4 probe): '
++                      'real init memsets 0x2C B at the same 0x1086EC and '
++                      'writes read-fn 0x212AA1 @+0x20 (+0x24 get/erase '
++                      '0x2127B3) — stub writes the same field layout with '
++                      'observed stock values. Real init needs the pl2021 '
++                      'NAND-probe handshake (NFI+0x14/0x220 polling) the '
++                      'NfiModel does not answer (built for BROM-era traffic) '
++                      '— extension deferred, see porting-notes Task-4 ruling'),
++    'part_load': Seam(0x20F4A8, 'real',
++                      'hook observes entry args only; the real NS6548 '
++                      'part_load runs (donor emu_chain docstring)'),
++    'verify_lk': Seam(0x201D70, 'real-crypto-host',
++                      'REAL host-side RSA-2048/PSS vs the Amazon LK modulus '
++                      'embedded in the pinned preloader (guarantee Task 5; '
++                      'key VMA 0x222260 from sub_201D70\'s own pool — the '
++                      'recovery-note 0x22244C is wrong for this build). '
++                      'Silicon truth: only genuinely Amazon-signed images '
++                      'pass; tests/test_pl_hostcrypto.py'),
++    'mtee_verify': Seam(0x216140, 'oracle-conservative',
++                        'always-OK for the genuine donor tee2 images the '
++                      'chain loads; the crafted tee1 aborts its read '
++                      'before any verify (real part_load order)'),
++    'tee_set_entry': Seam(0x2160A8, 'stub',
++                          'entry-cell store (0x108736) skipped; the cell '
++                          'has no consumer on the emu chain path (handoff '
++                          'is modeled by the harness return)'),
++    'secmem_rearm': Seam(0x216170, 'stub',
++                         'identity return; real body is mblock/secmem '
++                         'bookkeeping needing live DRAM-layout globals — '
++                         'load-address passthrough is the only observed '
++                         'consumer (part_load verify re-arm)'),
++    'assert': Seam(0x21082C, 'oracle-conservative',
++                   'panic oracle: models assert -> boot halt (the '
++                   'check_part_overlapped assert(239) family)'),
++    'usb_handshake': Seam(0x20D7DC, 'oracle-conservative',
++                          'hang oracle: models do_usb_handshake while(1) '
++                          '— the headless brick (crumpet2021.c '
++                          'on_lk_load_failure rationale)'),
++    'memcpy': Seam(0x215B70, 'reimplemented',
++                   'host mem_copy with AAPCS return; donor F-table '
++                   'treatment — unicorn cannot decode the ARM builtin '
++                   'cluster (porting-notes §platform item 5, Task 13b)'),
++    'timer_get': Seam(0x215C5C, 'stub',
++                      'monotonic counter; polled MMIO time never advances '
++                      'under unicorn (same class as payload mdelay/udelay '
++                      'timer stubs)'),
++    'arb_fuse_read': Seam(0x20192C, 'staged',
++                          'staged efuse version word (fuse_ver=1; family '
++                          'evidence antirback_*_version=0x1) — the payload '
++                          'patches the ARB check + burn regardless '
++                          '(crumpet2021.c apply_patches)'),
++    'tee_ver_get': Seam(0x21A560, 'staged',
++                        'staged version stamp 1 — internally consistent '
++                        'with the stock 2021 set the chain boots'),
++    'lk_ver_get': Seam(0x201EE8, 'staged',
++                       'staged version stamp 1 — same consistency note'),
++    'tramp': Seam(0x120000, 'staged',
++                  'bdev->read boundary (TRAMP shim vector in SRAM): flash '
++                  'bytes served host-side from the Flash/ChipDumpFlash '
++                  'source; the pointer call through bdev+0x20 is REAL '
++                  'vendor code (the exploit\'s hijack mechanism)'),
++    'uart_thr': Seam(0x11005000, 'staged',
++                     'true I/O: UART THR writes logged host-side; LSR '
++                     'staged THR-empty (I/O class)'),
++    'printf': Seam(0x2110F4, 'staged',
++                   'true I/O: printf decode (fmt_stub) — log surface '
++                   'only, no control-flow effect'),
++    'efuse_sbc': Seam(0x10009060, 'staged',
++                      'SBC eFuse bit staged per scenario (sbc=True -> '
++                      'bit 1 set, production-die state per '
++                      'brom-sbc-revalidation.md)'),
++}
+diff --git a/docs/guarantee.md b/docs/guarantee.md
+new file mode 100644
+index 0000000..c4c7507
+--- /dev/null
++++ b/docs/guarantee.md
+@@ -0,0 +1,134 @@
++# Guarantee — amonet-koboreru crumpet2021 on real silicon
++
++**Status: COMPLETE (plan: `docs/superpowers/plans/2026-11-08-amonet-customfw-guarantee.md`)** ·
++Run it: `venv/bin/python scenarios/guarantee.py` (exit 0 iff every leg is green; `--json` for machine-readable, `--trace-diff UART_LOG` for the capture comparison).
++
++Scope statement: an emulator cannot *guarantee* silicon behavior. What
++this repo delivers is a **bounded guarantee**:
++
++1. every pure-code step of the chain executes REAL vendor/payload bytes
++   under emulation and passes (test-pinned, below);
++2. every seam where the emulator substitutes for silicon is classified
++   and cited (`crumpet_emu/preloader/seams.py`, kept honest by
++   `tests/test_seam_ledger.py`) and is real, staged-with-citation,
++   real-crypto, or provably conservative;
++3. the irreducible hardware risks are enumerated with impact and an
++   on-device check (§4) — those are the residual, and no emulator can
++   clear them.
++
++## 1. Seam fidelity matrix (preloader layer)
++
++Authoritative source: `crumpet_emu/preloader/seams.py`. Chain-critical
++seams must not be reimplementations — enforced by
++`tests/test_seam_ledger.py::test_chain_critical_seams_not_reimplemented`.
++
++| seam | VMA | kind | pinned by |
++|------|-----|------|-----------|
++| hdr_parse | 0x20F2D8 | **real** | tests/test_real_parse_overlap.py |
++| overlap_chk | 0x20F398 | **real** (the vulnerability itself; claim state = guest cells @0x224920) | tests/test_real_parse_overlap.py |
++| part_get | 0x20F250 | **real** (walk @0x20F1F8 over the staged real-GPT table @DRAM_BUF+0x69244) | tests/test_real_part_get.py |
++| bdev_init | 0x212EFC | staged (re-arm; real init fully decoded incl. read-fn 0x212AA1 @+0x20 — NfiModel extension deferred) | porting-notes §guarantee Task 4 |
++| verify_lk | 0x201D70 | **real-crypto-host** (RSA-2048/PSS vs the embedded Amazon modulus, key VMA 0x222260) | tests/test_pl_hostcrypto.py |
++| part_load | 0x20F4A8 | real (always was) | suite (38 donor tests + chain) |
++| mtee_verify | 0x216140 | oracle-conservative (donor tee2 passes; crafted tee1 aborts before verify — real part_load order) | suite |
++| assert / usbdl handshake | 0x21082C / 0x20D7DC | oracle-conservative (panic/halt oracles) | suite (brick repros) |
++| tramp (bdev->read) | SRAM shim | staged (flash bytes host-side; the pointer indirection through bdev+0x20 — the hijack mechanism — is REAL code) | chain tests |
++| fuse/stamps/timers/uart/printf | — | staged (I/O class; ARB patched by the payload regardless) | suite |
++
++## 2. What the emulator proves (per leg, with the test that pins it)
++
++- **P3 / the exploit's load-bearing fallback** — the REAL stock TEE
++  loader `sub_20E19C` walks the crafted tee1: atf sub-image at
++  TEE_LOAD_ADDR first, then the crafted sub-image against the loader's
++  own zero-initialized `*addr` cell (dynamically proving the port-doc
++  premise; the old harness fabricated this call shape). Real
++  `check_part_overlapped` claims `[0, 0x108803]` for name `lk` and
++  returns — no panic; the copy to 0 fires the hijack through the real
++  block loop; the real payload runs; the patched LK lands at
++  0x41E00000; tee2 fallback completes; patched ARB passes with zero
++  RSA calls.
++  → `tests/test_real_parse_overlap.py`, `tests/test_customfw_guarantee.py` (both slots, from a real deploy's chip dump).
++- **RSA gate is load-bearing** — real crypto rejects `lk-patched` (the
++  brick-2 mechanism) while the payload's gate patch skips the call:
++  `verify_calls == 0` on the chain.
++  → `tests/test_pl_hostcrypto.py::test_patched_lk_fails_verification`, leg-2 assertion.
++- **Unlock gate** — REAL `cmd_lock_check`: stock restricts
++  `flash:boot` (1) on the locked device; patched returns allowed (0).
++  → `tests/test_lk_customfw.py::test_lock_gate_differential`.
++- **Unsigned boot acceptance** — REAL `verify_and_vb` on an unsigned
++  custom image: stock executes the RED block (FAILED AUTHENTICATION,
++  vbstate 3, ret −0xD); the patched RED-abort branch skips to the
++  publish path.
++  → `tests/test_lk_customfw.py::test_verify_and_vb_differential`.
++- **Downgrade precondition** — the REAL BROM classifies the 2021 belt
++  (and the post-deploy dump) as `boots_2021_pl`.
++  → `tests/test_customfw_guarantee.py` leg 4, `scenarios/boot_brom.py`.
++- **Closed loop** — `deploy()` places the real artifacts on the
++  emulated NAND; the chain boots the dump's bytes at true placement.
++  → `tests/test_layer4_closedloop.py`, `tests/test_customfw_guarantee.py`.
++- **UART agreement** — `scenarios/guarantee.py --trace-diff
++  no-alexa/…/tp54_gnd.txt`: of the emulated stock-boot PL lines, 8
++  exact + 3 prefix matches in the real capture (the device log's
++  PLFM/PMIC init phase is outside the emulated surgical surface).
++
++### Audit findings landed during this work
++
++- The LK-verify key lives at VMA **0x222260** (file 0x29560), not the
++  0x22244C recorded in `recovery-notes/preloader-vuln-signature.md` §2 —
++  recovered from `sub_201D70`'s own pc-relative pool and
++  fingerprint-matched (porting-notes §guarantee Task 5).
++- The donor `emu_chain.py` docstring claimed `check_part_overlapped`
++  ran real while the port stubbed it — the docstring was wrong; the
++  stub is now real code (Task 2).
++
++## 3. LK unlock-leg seams
++
++- Patch-set byte verification: `tests/test_lk_patches.py` (three sites
++  re-derived from the stock donor, byte-diff allowlist).
++- Executed on real patched bytes: `crumpet_emu/lk/customfw.py` +
++  `tests/test_lk_customfw.py`.
++- **Ceilings (M2 class, honestly parked):** (1) the real fastboot
++  dispatcher loop (0x41E1E1A2) is unreachable surgically —
++  fastboot_init faults at its NULL handler-registration list
++  (boot-time heap state; porting-notes §guarantee Task 8); per-handler
++  surgical dispatch + the real-callee lock-gate differential are the
++  execution surface. (2) `verify_and_vb`'s publish path beyond its
++  first stages needs natural-boot state (wfi/IRQ blocker, porting-notes
++  §platform 5c). (3) The fastboot flash WRITE path needs LK's
++  boot-built partition table + mmc stack — the operator's actual flash
++  routes (Linux-root dd; mtkclient through the DA-patched preloader
++  USBDL) are covered by the deploy pipeline against the emulated chip.
++
++## 4. Risk register (irreducible hardware risks)
++
++| # | risk | impact | on-device check / mitigation |
++|---|------|--------|------------------------------|
++| 1 | NFI/DMA read behavior during the mid-transfer bdev overwrite: the emu serves flash bytes host-side at the `bdev->read` boundary. The per-block pointer re-fetch is real preloader code, but silicon read granularity, ECC-retry re-reads, or DMA chunking could differ. | hijack may fire at a different block boundary — payload is position-staged by header, not block index, so the class of divergence is "would have fired anyway or never"; no partial state | first boot with UART attached; abort-power plan if the `[BLDR] tee1 part. TEE load fail` line does not appear where the emu shows it |
++| 2 | Per-unit eFuse ARB state | stock ARB check would halt on fuse>sw before the TEE loads — but the payload patches the check AND the burn pre-execution every boot (proven order: patch before check) | read `getvar` antirback versions on the live unit pre-flash; the exploit's belt includes the 2021 preloader whose stamps the emu verified pass (fuse=1 case) |
++| 3 | Active slot (lk_a vs lk_b) unknown per unit | flashing the exploit to the ACTIVE slot's LK position would be wrong | both slot variants built + emu-tested; detect via the misc BCB page (deploy does), `unit3-preflight-fastboot-vars.txt`, or the no-alexa convention (boots lk_b) |
++| 4 | BROM SBC enforcement (live on production dies) | only Amazon-signed preloaders boot; the 2021 NS6548 belt is Amazon-signed (BROM leg proves it boots) | no unsigned preloader is ever flashed; the belt comes from the OTA set |
++| 5 | NAND placement exactness | misplaced pages = unbootable | closed-loop leg proves the deploy places at true GPT pages and the chain boots them from the dump |
++| 6 | USB timing (USBDL recovery path) | headless unit hangs in handshake (brick class) | crumpet2021.c never forces USBDL on normal boots (`usbdl_detect_key()==0`); on_lk_load_failure falls back to stock boot; USBDL is recovery-only via the physical key combo |
++| 7 | M2 ceilings (§3) | unlock-leg behaviors beyond the pinned surfaces are surgical, not natural-boot | first boot observation: fastboot comes up (getvar answers), then flash via the proven deploy route |
++
++## 5. Pre-flash checklist (ordered)
++
++1. **Backup first** — `deploy()` writes a verified backup before any
++   flash (§7.4 pipeline; keep the backup dir off-device).
++2. **Slot detection** — read misc BCB / unit preflight vars; pick the
++   matching build (`crumpet2021-lka` / `-lkb`).
++3. **Belt precondition** — the unit must be on the 2021 NS6548
++   preloader belt (or be downgraded to it first: LK does not enforce
++   rollback; BROM accepts the signed belt — both emu-proven).
++4. **ARB read** — capture `getvar` antirback values before flashing
++   (risk #2).
++5. **UART attached for first boot** — expect the emu's exact line
++   sequence (`[BLDR] tee1 part. TEE load fail`, `check_part_overlapped
++   done`, patched ARB pass, fastboot banner).
++6. **Abort-power plan** — if the first boot diverges from the emu trace
++   before the payload banner, cut power: the exploit is staged in
++   tee1/lk_a only, and the stock boot fallback (tee2 + active-slot LK)
++   is intact until the custom LK is written to a slot you boot from.
++7. **Re-generate the guarantee** before any artifact change:
++   `venv/bin/python scenarios/guarantee.py` must print
++   `VERDICT: GUARANTEE HOLDS`.
+diff --git a/docs/porting-notes.md b/docs/porting-notes.md
+index 910733e..4980153 100644
+--- a/docs/porting-notes.md
++++ b/docs/porting-notes.md
+@@ -367,10 +367,132 @@ documented (§platform item 5c): the bootstrap thread becomes idle and
+ the main thread preempts only via the system-timer IRQ; unicorn 2.1.4
+ exposes **no interrupt-injection API** (ctl surface inspected), so
+ `boot()` parks at `wfi` (0x41E1A550) and honestly reports
+ `reached_fastboot=False`. Completion prerequisite: a **GIC +
+ system-timer IRQ model** at register level, derivable from LK's own
+ GIC/timer drivers and the MT8167 timer registers (precedent: the NFI
+ register model built from `nfi_regs.json`). NOT a stub-class task — a
+ GIC-ack model would have no donor citation (fabricated-platform
+ territory). Downstream work proceeds on the surgical path (Task 14
+ auth observability landed there).
++
++## §guarantee — amonet custom-firmware guarantee effort (2026-11-08)
++
++Charter: make the emu a bounded pre-flight oracle for the amonet-koboreru
++crumpet2021 chain + patched-LK custom-firmware path (plan:
++`docs/superpowers/plans/2026-11-08-amonet-customfw-guarantee.md`,
++deliverable: `docs/guarantee.md`). This effort intentionally DEVIATES from
++the donor-verbatim rule for four preloader seams (hdr_parse 0x20F2D8,
++overlap_chk 0x20F398, part_get 0x20F250, bdev_init 0x212EFC): the donor
++shipped host reimplementations, and the guarantee requires REAL vendor
++code there. Rulings for each upgrade are appended in this section by the
++landing task; the reimplementations stay reachable via
++`Emu(..., legacy_seams=True)` for differential comparison.
++
++### Task-2 ruling (guarantee plan): real hdr-parse + overlap, legacy mode
++
++The donor's HDR_PARSE/OVERLAP_CHK reimplementations are demoted to
++`Emu(..., legacy_seams=True)` (default False). Default path: the REAL
++sub_20F2D8 and sub_20F398 execute; hooks observe only (last_hdr mirror;
++`overlap[real]` event lines; claim state = guest cells at 0x224920,
++in-file init {0,0}, name ptrs in-file pre-relocated — probe-verified).
++
++Probe finding recorded for the guarantee: the donor CLI's phase-1 drive
++(`part_load` at offset 0xE800 with a fabricated `*addr == 0`) models only
++the loader's SECOND sub-image call. Driving offset 0 with `*addr == 0`
++under the real parsers panics on the atf sub-image — correct real
++behavior for that wrong shape. The REAL stock loader sub_20E19C walks
++atf first at TEE_LOAD_ADDR (0x43001000) and passes its own zero cell for
++the crafted sub-image — dynamically proving port-doc premise P3 (the
++exploit's load-bearing fallback). The CLI keeps its donor-verbatim drive
++(the shape matches the second call); the guarantee tests
++(test_real_parse_overlap.py) and the Task-7 e2e drive the real loader.
++
++### Task-3 ruling (guarantee plan): real part_get on a staged real-GPT table
++
++The donor's PART_GET synthesized-struct stub is demoted to
++`legacy_seams=True`. Default: REAL sub_20F250 (name memcpy to
++0x102A70) + the sub_20F1F8 walk execute against a table staged at
++`*(*(0x22518C)) + 0x69244` — the double deref resolves via SRAM_DBUF_PTR
++(0x102994) to DRAM_BUF+0x69244, matching the walk disasm (entries 0x14 B:
++start@0, nblk@4 (0 terminates), name*@0x10; match copied to the global
++struct 0x102A5C with the name copied to 0x102A0C/0x102A70 .bss buffers).
++Entry values come from flash.gpt.parse_gpt_from_image on the pinned
++2021:brhgptpl_0 (LBA4096 -> 512-block x8, the donor GPT-dict rule) — the
++boot-time part_init build is the staged state (LK-platform.py
++boot-state precedent). Hook observes only (part_get[real] event).
++
++### Task-4 ruling (guarantee plan): bdev_init stays staged; NFI-model
++### extension deferred
++
++Probe result (probes/bdev_init_probe3.py): the REAL sub_212EFC runs
++under the preloader Emu with the NfiModel + donor NandChip mapped, but
++takes its error branch — the pl2021 NAND probe handshake (11 NFI
++accesses; polls at NFI+0x14/0x220 the model answers 0) is not covered
++by NfiModel, which was built for the BROM-payload stage2 driver traffic.
++Full decode recovered instead (pool-literal math in the probe):
++- real init targets the SAME struct 0x1086EC (memset 0x2C B);
++- fields from the probe ctx: id @+0, blksize ctx+0x9C @+4, ctx+0xA4
++  @+8, ctx+0x94 @+0xC;
++- read method @+0x20 = **0x212AA1** (real mtk_nfc read; |1 Thumb),
++  +0x24 = 0x2127B3.
++
++Decision: keep the re-arm stub (kind 'staged', citation above) — after
++the payload hijack, the only chain consumer of the struct is the
+++0x20 indirection part_load calls per block; the stub restores exactly
++that mechanism with observed stock values. Real-init upgrade path:
++extend NfiModel to answer the pl2021 driver register traffic, then the
++whole read path (0x212AA1) becomes real code — deferred as
++high-value-later (ledger minor).
++
++### Task-5 ruling (guarantee plan): VERIFY_LK = real host crypto
++
++The stock-bytes-equality RSA oracle is replaced by REAL host-side
++RSA-2048/PSS (crumpet_emu/preloader/hostcrypto_pl.py) against the
++Amazon LK modulus embedded in the pinned preloader — recipe exactly
++sub_201D70's (recovery-notes/preloader-vuln-signature.md §3.1: sig =
++last 0x100, SHA-256 over the data, PSS salt 0x20, embits 2047,
++e 65537).
++
++KEY-VMA CORRECTION (guarantee Task 5 finding): the recovery-note's key
++location VMA 0x22244C / file 0x2974C is WRONG for the pinned NS6548
++2021 image (that offset holds a pointer table). sub_201D70's own
++pc-relative pool (ldr r1,[pc,#0x100] @0x201DA0) resolves the key to
++VMA 0x222260 / file 0x29560, where the recorded modulus fingerprint
++(9824ee73…) actually lives. hostcrypto_pl fails loudly on fingerprint
++mismatch.
++
++Conservatism note: real crypto is the silicon truth (any
++Amazon-signed image passes); the old oracle was accidentally stricter
++(only byte-exact stock). For the chain verdict both directions agree:
++the custom/patched LK fails both — that failure is what makes the
++payload's LK_VERIFY_GATE_PATCH load-bearing (brick-2 mechanism).
++
++### Task-6 ruling (guarantee plan): patched LK executes; two surgical
++### ceilings recorded
++
++crumpet_emu/lk/customfw.py runs the PATCHED LK as real code:
++- lock gate: real cmd_lock_check — stock 'flash:boot' -> 1 (restricted),
++  patched -> 0 (allowed); getvar allowed both (not blocklisted);
++- verify_and_vb (0x41E11548(start, size)) on an unsigned custom image:
++  stock executes the RED block (FAILED AUTHENTICATION, vbstate 3,
++  ret -0xD); patched 0x41E1158C branches straight to 0x41E115AE (publish
++  path) — the RED-abort patch's exact semantics, executed.
++
++Ceilings (honest, not stubbed around): (1) the publish path deeper than
++its first stages needs natural-boot state (M2 class — wfi/IRQ blocker);
++(2) fastboot flash WRITE path needs LK's boot-built partition table +
++mmc stack (fault at ptable walk 0x41E19456, NULL head). The operator's
++real flash routes (Linux-root dd; mtkclient via DA-patched preloader
++USBDL) are covered by the deploy pipeline against the emulated chip
++(tests/test_layer4_closedloop.py) instead. vbstate cell: double-deref
++chain *0x41E38D10 (from 0x41E11548's own pc-relative pool).
++
++### Task-8 ruling (guarantee plan): real dispatcher loop = M2 ceiling
++
++Probe (probes/fb_loop_probe.py): surgical fastboot_init (0x41E1E3B4)
++logs 'fastboot_init()' then faults at 0x41E1BA90 (read addr=0x8) — the
++handler-registration linked list is boot-time heap state, cold-NULL. The
++real command loop (0x41E1E1A2) therefore cannot be entered surgically
++without fabricating that state (out of stub class per the M2 ruling).
++No code: the unlock-leg evidence stays the per-handler surgical
++dispatch + the real-callee lock-gate differential (Task 6).
+diff --git a/docs/superpowers/plans/2026-11-08-amonet-customfw-guarantee.md b/docs/superpowers/plans/2026-11-08-amonet-customfw-guarantee.md
+new file mode 100644
+index 0000000..6f1fd0f
+--- /dev/null
++++ b/docs/superpowers/plans/2026-11-08-amonet-customfw-guarantee.md
+@@ -0,0 +1,177 @@
++# Amonet custom-firmware guarantee Implementation Plan
++
++> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
++
++**Goal:** Make crumpet-emu a bounded pre-flight oracle proving the amonet-koboreru `crumpet2021` chain + patched-LK path can create/run custom firmware on real crumpet silicon: every pure-code step executes real vendor/payload bytes, every seam is real / staged-with-citation / provably-conservative, and one CLI prints the verdict matrix plus the irreducible hardware-risk register.
++
++**Architecture:** Three fidelity upgrades. (1) Preloader layer: the four reimplemented seam functions (header parse, `check_part_overlapped`, `part_get`, `boot_device_init`) move to REAL code execution — reimplementations stay behind `legacy_seams=True` for differential comparison. (2) LK layer: the patched LK (`2021:lk-patched`) is executed, not just byte-verified — lock gate differential, fastboot e2e on patched bytes, and a surgical `verify_and_vb` (0x41E11548) unsigned-boot.img acceptance test. (3) Glue: the patched-LK bytes the preloader chain stages at 0x41E00000 feed `LkSession` for the unlock leg, making one end-to-end pinned test: deploy → chip dump → exploit → patched LK → custom boot.img accepted.
++
++**Tech Stack:** Python 3 in the repo venv (`venv/`), Unicorn 2.1.4, capstone, pytest (tier-gated), existing `crumpet_emu` package. IDA/capstone for disasm ground truth where a real function's state needs are derived.
++
++**Spec:** this plan + audit findings embedded in it; supporting evidence: `WS/recovery-notes/amonet-crumpet-2019-port.md` (constants, §3 vulnerability), `WS/recovery-notes/preloader-vuln-signature.md` §2 (key VMAs), `tools/derive_lk_patches.py` docstring (patch set), `docs/porting-notes.md` (donor-verbatim rule, staging precedent), `WS/no-alexa/logicanalyzer/uart_logs/` (real-device UART ground truth). `WS` = `/home/am/Work/SRE-Device`.
++
++## Global Constraints
++
++- **Never modify `WS/tools/amonet-koboreru`** — its AGENTS.md forbids LLM code changes. Read/build only.
++- **Donor-verbatim rule:** changes to ported donor modules (`crumpet_emu/preloader/emu.py` etc.) require a ruling appended to `docs/porting-notes.md` (§seam-style) naming the delta and its justification. Keep legacy behavior reachable (`legacy_seams=True`).
++- **No fabricated semantics:** every new staging state or stub needs a citation (real-device UART line, IDA finding, or real-image byte offset) recorded in the code comment and the ledger. Fabricated-platform territory is out (porting-notes M2 ruling stands).
++- Use `venv/bin/python` for everything; never system pip (global AGENTS.md venv policy).
++- Tier gating: every new test that needs vendor bins gates via the existing `resources`/manifest pattern; Tier 1 must stay green with zero bins.
++- All 20 vendor slots + 12 own artifacts are currently placed/pinned — keep tests passing when bins are absent (skip, don't fail).
++- Commit after every task; repo is a fresh clone at `7a99249`.
++
++## Review Focus
++
++1. **A real-seam upgrade silently changing semantics** — real parser/gate must reproduce every stock case the reimplementation passed; differential legacy-vs-real must agree on the stock belt before the legacy path is demoted. Test: Task 2 step 4 (differential over CAL-1/CAL-2 + scenario C).
++2. **Crafted-header edge cases** (`maddr != 0xFFFFFFFF`, name case `'LK'` vs `'lk'`, non-`lk` crafted name) — real `check_part_overlapped`/parse must not panic where silicon wouldn't. Test: Task 2 step 5.
++3. **Patched LK vs 2025-derived seeds** — `lk-patched` is the 2025 donor + 3 patches; every seed/F-table address used by the new legs must be asserted valid against patched bytes. Test: Task 6 step 2.
++4. **Both slot variants** — lka and lkb payloads must each chain-complete; a slot-specific GPT/offset bug must fail loudly. Test: Task 7 step 3.
++5. **Missing bins** — new tier-2 tests skip cleanly (no traceback, provenance pointer) with zero bins placed. Test: Task 7 step 5 (rerun of `pytest -q` in a bins-absent tree, mirroring `tests/test_tiers.py` practice).
++
++---
++
++### Task 1: Seam inventory + ledger
++
++**Files:**
++- Create: `crumpet_emu/preloader/seams.py`
++- Create: `docs/guarantee.md` (skeleton: matrix + risk register sections, empty rows)
++- Modify: `docs/porting-notes.md` (new §guarantee section: this effort's charter)
++- Test: `tests/test_seam_ledger.py`
++
++**Interfaces:**
++- Produces: `SEAMS: dict[str, Seam]` where `Seam = namedtuple('Seam', 'vma kind citation')`, `kind ∈ {'real', 'staged', 'oracle-conservative', 'reimplemented'}`; `SEAM_CHAIN_CRITICAL: frozenset[str]` (names whose kind must not be `'reimplemented'` once Tasks 2–4 land: `hdr_parse`, `overlap_chk`, `part_get`).
++
++- [ ] **Step 1: Write the failing test** — `test_seam_ledger.py` with two tests: (a) `test_every_intercepted_seam_documented`: every entry in `Emu.hook_code`'s intercepted-address set used by the amonet chain (`HDR_PARSE, OVERLAP_CHK, PART_GET, BDEV_INIT, PART_LOAD, VERIFY_LK, MTEE_VERIFY, TEE_SET_ENTRY, SECMEM_REARM, ASSERT, USB_HANDSHAKE, MEMCPY, TIMER_GET, 0x20192C, 0x21A560, 0x201EE8, TRAMP, UART_THR, PRINTF`) has a `SEAMS` entry with a non-empty citation; (b) `test_chain_critical_seams_real` (the forcing function): each name in `SEAM_CHAIN_CRITICAL` (`hdr_parse`, `overlap_chk`, `part_get`) has kind in `{'real','staged','oracle-conservative'}` — shipped `xfail(strict=True, reason='Tasks 2-3 upgrade the reimplemented seams')`.
++
++- [ ] **Step 2: Run test to verify it fails**
++
++Run: `venv/bin/python -m pytest tests/test_seam_ledger.py -q`
++Expected: FAIL listing the four reimplemented chain-critical seams.
++
++- [ ] **Step 3: Implement `seams.py`** — the inventory above with today's honest classifications + one-line citations (port doc §3, README seam list, porting-notes §seam). Write the `docs/guarantee.md` skeleton and the porting-notes charter paragraph.
++
++- [ ] **Step 4: Run test to verify it passes** — expected PASS: (a) green as written; (b) xfail as marked. Tasks 2/3 flip the two upgraded seams' kind and remove the xfail (their own steps say so).
++
++- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(guarantee): seam inventory ledger + charter"`
++
++### Task 2: Real header-parse + real check_part_overlapped
++
++**Files:**
++- Modify: `crumpet_emu/preloader/emu.py` (constructor flag `legacy_seams=False`; `hook_code` branches for `HDR_PARSE`/`OVERLAP_CHK` only when `legacy_seams`)
++- Modify: `crumpet_emu/preloader/seams.py` (kinds → `'real'`), `docs/porting-notes.md` (ruling), `docs/guarantee.md` (rows)
++- Test: `tests/test_real_parse_overlap.py`
++
++**Interfaces:**
++- Consumes: `Emu.__init__(flash, sbc, log, payload_syms, stock_ok, legacy_seams=False)`.
++- Produces: real-code execution at `0x20F2D8`/`0x20F398`; `Emu.lk_region` now mirrors the guest global after each call (host copy for assertions only).
++
++- [ ] **Step 1: Probe first.** One-off script (not committed): build the CAL-1/CAL-2/chain calls with the two stub branches deleted, run under `try_call`, log first fault pc + unmapped accesses (pattern: porting-notes §platform probe). Determine what real state each function needs (`ctx` fields for parse at `DRAM_BUF+0x666F0`; `lk_region` global cell for overlap — locate via disasm of `sub_20F398` stores using capstone on `PL_IMG` bytes at `0x20F398 - FILE_DELTA`).
++- [ ] **Step 2: Write failing tests** — (a) chain (lka variant, own artifacts) completes with real parsers: payload staged, patched LK staged at 0x41E00000, no fault/stop; (b) crafted sub-image named `'TEE'` (not `'lk'`) hits the REAL assert path: `emu.stopped` with the ASSERT oracle event (real `assert(239)` → `sub_21082C`); (c) guest `lk_region` global equals claimed range `[0, dsize-1]` after the crafted load (read the cell the probe located); (d) differential: with `legacy_seams=True` vs `False`, the stock CAL-1/CAL-2 verdicts and event streams (minus the two seam's own event lines) agree.
++- [ ] **Step 3: Run to verify failures** (ImportError/TypeError on `legacy_seams` first).
++- [ ] **Step 4: Implement** — gate the two branches behind `legacy_seams`; zero any BSS cell the probe identified as `lk_region` in `__init__` (citation comment); re-arm `self.lk_region` mirror from the guest cell inside a small `hook_code` observer at the overlap function's return (no semantic writes — observation only, LK-platform.py precedent).
++- [ ] **Step 5: Run tests; then full suite** `venv/bin/python -m pytest -q` — everything green including `tests/test_layer4_closedloop.py` (its scenario-C boot now runs the real parsers).
++- [ ] **Step 6: Update ledger kinds + porting-notes ruling; commit.**
++
++### Task 3: Real part_get via staged partition table
++
++**Files:**
++- Modify: `crumpet_emu/preloader/emu.py` (`PART_GET` branch gated by `legacy_seams`; staging helper), `crumpet_emu/preloader/seams.py`, `docs/porting-notes.md`, `docs/guarantee.md`
++- Test: `tests/test_real_part_get.py`
++
++**Interfaces:**
++- Consumes: `crumpet_emu.flash.gpt.parse_gpt_from_image` (real GPT from `2021:brhgptpl_0`).
++- Produces: `Emu._stage_part_table()` — writes the real preloader partition-table structures (layout per disasm of `sub_20F250`: entry fields + `char*` names + list linkage) into SRAM scratch; `part_get` then runs REAL.
++
++- [ ] **Step 1: Probe.** Disassemble `sub_20F250` (capstone on image bytes) to recover the walked structure: global list head cell, per-entry field offsets (name ptr / start / blocks / next). Also disasm `sub_212EFC` head only (Task 4 input).
++- [ ] **Step 2: Write failing tests** — (a) real `part_get('lk_a')` returns a struct whose start/nblk match `parse_gpt_from_image()['lk_a']`; unknown name → 0; (b) chain completes end-to-end on real `part_get`; (c) differential legacy-vs-real event agreement.
++- [ ] **Step 3: Verify failures; implement staging + ungate; run tests + full suite.**
++- [ ] **Step 4: Ledger/ruling updates; commit.**
++
++### Task 4: BDEV_INIT ruling (probe, no forced upgrade)
++
++**Files:**
++- Modify: `crumpet_emu/preloader/seams.py` (kind → `'staged'` with justification, or `'real'` if the probe lands), `docs/porting-notes.md`, `docs/guarantee.md`
++- Test: extend `tests/test_seam_ledger.py` only
++
++- [ ] **Step 1: Probe `sub_212EFC` under Unicorn** with the `flash/nfi.py` `NfiModel` mapped at the NFI register window: does the real init complete (chip-id read path) and re-arm `bdev->read` to the real driver read function? Record what breaks first.
++- [ ] **Step 2: Ruling.** If real init + real driver reads work: gate behind `legacy_seams` same as Tasks 2–3, add chain test. Otherwise: reclassify the re-arm stub `'staged'` with citation (which fields the real init writes — from disasm) and a guarantee-doc paragraph explaining why the payload's own `boot_device_init()` call is state-equivalent on silicon. Either outcome closes the ledger row honestly.
++- [ ] **Step 3: Test/ledger updates; full suite; commit.**
++
++### Task 5: RSA oracle → real-crypto check (host-side, real keys)
++
++**Files:**
++- Create: `crumpet_emu/preloader/hostcrypto_pl.py`
++- Modify: `crumpet_emu/preloader/emu.py` (`VERIFY_LK` branch), seams/notes/guarantee docs
++- Test: `tests/test_pl_hostcrypto.py`
++
++**Interfaces:**
++- Consumes: preloader key VMAs from `WS/recovery-notes/preloader-vuln-signature.md` §2 (LK verify key @ VMA 0x22244C region — re-locate by entropy scan + xref, don't trust blindly).
++- Produces: `verify_lk_signature(image_bytes, pl_bytes) -> bool` (real RSA-2048/PSS vs the key embedded in the real pl image), used by the `VERIFY_LK` seam instead of the stock-bytes equality oracle.
++
++- [ ] **Step 1: Failing tests** — stock `2021:lk` sub-image verifies True; single-byte tamper → False; `2021:lk-patched` sub-image → False (proves the gate patch is load-bearing); garbage → False.
++- [ ] **Step 2: Implement** — parse the 256-B modulus/exponent from `PL_IMG` at the located offset (entropy + xref verification documented in-code); mirror `crumpet_emu/lk/hostcrypto.py` patterns for the math. Oracle semantics preserved: verify still happens AFTER the copy (real `part_load` order — unchanged).
++- [ ] **Step 3: Full suite (scenario C / closed-loop must stay green: patched LK now FAILS RSA but the gate patch skips it — assert `verify_calls` still 0 there). Ledger: kind `'oracle-conservative'` → `'real-crypto-host'`. Commit.**
++
++### Task 6: Execute the patched LK (unlock leg)
++
++**Files:**
++- Create: `crumpet_emu/lk/customfw.py`
++- Test: `tests/test_lk_customfw.py`
++
++**Interfaces:**
++- Consumes: `LkSession.build(bytes)`; `resources.resolve('lk-patched','2021')`; `FastbootHost`; `observe_auth`.
++- Produces:
++  - `lock_gate_differential() -> dict` — real `cmd_lock_check` @0x41E0EF18 called at its real call-site shape: stock → "locked" verdict, patched → "allowed".
++  - `patched_fastboot_flash(boot_bytes) -> (status, message)` — `FastbootHost` `download` + `flash:boot` on patched bytes → expect OKAY.
++  - `verify_and_vb(lk, boot_bytes) -> (ret, vbstate)` — surgical call of 0x41E11548 with staged `*g_vbstate` + deviceinfo (platform.py staging precedent): patched → ret 0 / published state; stock → ret -0xD / RED.
++
++- [ ] **Step 1: Probe** seed validity on patched bytes: assert every seeds.json VMA used (`usb_read`, `usb_write`, dispatcher/handler VMAs, 0x41E11548, 0x41E00F58) disassembles to the expected prologue in `lk-patched` (capstone; catches any drift).
++- [ ] **Step 2: Failing tests** — (a) stock vs patched `cmd_lock_check` differential; (b) patched flash:boot custom bytes → OKAY, stock → FAIL (locked); (c) `verify_and_vb`: patched accepts unsigned custom boot.img (build a minimal boot.img from `2025:boot` with tampered signature page — must NOT verify under `observe_auth`, proving it is genuinely unsigned), stock rejects same bytes; (d) `getvar:version` replies OKAY on the patched session through `FastbootHost` (dispatcher plumbing on patched bytes); unlocked-state *reporting* (`deviceinfo+0x1E2` publish) is natural-boot-only (M2 ceiling) and is documented, not tested, in `docs/guarantee.md`.
++- [ ] **Step 3: Implement** (`customfw.py`, thin orchestration over existing session surfaces; staging cited from porting-notes §platform table).
++- [ ] **Step 4: Full suite; commit.**
++
++### Task 7: End-to-end custom-firmware guarantee test (pinned, tier 2)
++
++**Files:**
++- Create: `tests/test_customfw_guarantee.py`
++- Test: itself
++
++**Interfaces:**
++- Consumes: Tasks 2–6 surfaces + `crumpet_emu.deploy.main` + `ChipDumpFlash` + `boot_brom` classifier + `tests/test_layer4_closedloop.py` fixture pattern.
++
++- [ ] **Step 1: Failing test** — one test, four legs: (1) `deploy()` onto emulated NAND (both slot variants), chip dump; (2) preloader chain boots from dump with real seams → patched LK staged at 0x41E00000, byte-identical to `2021:lk-patched`; (3) those staged bytes → `LkSession` → Task-6 legs all pass; (4) BROM classifier accepts the dumped 2021 belt (`boots_2021_pl`). Verdict object: `CustomFwGuarantee(chain_ok, unlock_ok, brom_ok, seam_ledger_ok)` — all True.
++- [ ] **Step 2: Implement glue** (reuse closed-loop fixtures; parametrize lka/lkb).
++- [ ] **Step 3: Run both slot variants** — both must pass; a slot failure is a loud bug, not a skip.
++- [ ] **Step 4: Full suite green; commit.**
++
++### Task 8: Real fastboot dispatcher loop (stretch probe)
++
++**Files:**
++- Modify (only if probe lands): `crumpet_emu/usb/fastboot.py` (`loop_send()` alternative entry), notes/guarantee docs
++- Test: extend `tests/test_lk_customfw.py`
++
++- [ ] **Step 1: Probe.** Surgically call `fastboot_init` (0x41E1E3B4) on a patched session, then enter the real command loop 0x41E1E1A2 with the usb seam queued (`getvar:version`, then `download`+`flash:boot`). Record the first unmapped/fault (the handler-list boot state is the known risk — porting-notes §seam).
++- [ ] **Step 2: If it runs:** add `FastbootHost.loop_send()` driving the REAL loop (usb_read/write seams only) and re-run the Task-6 flash through it — now `cmd_lock_check` executes in its real call-site context 0x41E1E1FC. If it does not: ledger + guarantee-doc paragraph recording the surgical-dispatch ceiling (M2-class), no code. Either way: commit.
++
++### Task 9: `scenarios/guarantee.py` CLI + UART trace-diff
++
++**Files:**
++- Create: `scenarios/guarantee.py`
++- Modify: `README.md` (CLI table row), `docs/guarantee.md` (final content)
++- Test: `tests/test_scenario_clis.py` (extend)
++
++**Interfaces:**
++- Produces: `python scenarios/guarantee.py [--slot lk_a|lk_b|both] [--skip-brom]` → prints the verdict matrix (per-leg PASS/FAIL + seam-ledger status) and, `--json` path, machine-readable verdict; exit 0 iff all green. `--trace-diff` mode: emu stock-boot `pl_log` vs `WS/no-alexa/logicanalyzer/uart_logs/tp54_gnd.txt` — line-classified agreement report (exact/prefix-only/emu-only/device-only), written into `docs/guarantee.md` by hand after review.
++
++- [ ] **Step 1: Failing CLI test** (pattern of `tests/test_scenario_clis.py`: `--help` Tier-1 green without bins; full run Tier-2 gated).
++- [ ] **Step 2: Implement CLI** (thin argparse over Task 2–7 surfaces).
++- [ ] **Step 3: Run it for real; capture output; commit.**
++
++### Task 10: Guarantee document (the deliverable)
++
++**Files:**
++- Modify: `docs/guarantee.md` (full), `README.md` (link), `docs/porting-notes.md` (final ruling cross-refs)
++
++- [ ] **Step 1: Write the doc** — (a) fidelity matrix: every seam row (name, VMA, class, citation, test that pins it); (b) what the emu PROVES (each leg → real bytes executed → test id); (c) residual hardware-risk register, each with impact + on-device check: NFI/DMA mid-transfer timing (bdev read re-fetch is real code, but silicon read granularity/ECC retry can differ → check: first boot with UART attached, abort-power plan), per-unit eFuse ARB state (patch neuters check + burn; verify fuse version via `getvar` before flashing), active-slot unknown (both variants built + tested; detect via BCB/misc page or unit3 preflight vars), NAND placement exactness (closed-loop covers), M2 wfi ceiling (unlock leg is surgical, not natural-boot), USB timing (n/a — headless unit, USBDL only as recovery); (d) pre-flash checklist ordering (backup via deploy → slot detect → belt downgrade precondition → flash → first-boot observation).
++- [ ] **Step 2: Cross-link** from `WS/recovery-notes/PROJECT-STATE.md` (one paragraph, pointer to `docs/guarantee.md`).
++- [ ] **Step 3: Final full suite + `scenarios/guarantee.py` run; commit.**
+diff --git a/scenarios/guarantee.py b/scenarios/guarantee.py
+new file mode 100644
+index 0000000..66569b4
+--- /dev/null
++++ b/scenarios/guarantee.py
+@@ -0,0 +1,179 @@
++#!/usr/bin/env python3
++"""Guarantee CLI: run the amonet custom-firmware guarantee legs and print
++the verdict matrix (guarantee plan Task 9).
++
++Legs (all real-code, details in docs/guarantee.md):
++  chain-<slot>   the REAL stock TEE loader walks the crafted tz variant
++                 (real parsers/overlap/part_get/RSA) — hijack fires,
++                 patched LK staged, tee2 fallback, patched ARB passes;
++  unlock         patched-LK execution legs (lock-gate differential,
++                 RED-abort acceptance, getvar plumbing);
++  brom           the REAL BROM classifies the stock 2021 belt bootable;
++  ledger         the seam ledger has no chain-critical reimplementation.
++
++Exit 0 iff every leg is green. --json PATH writes the machine-readable
++verdict. All binary resolution is lazy: --help needs no vendor bins.
++
++--trace-diff UART_LOG classifies an emulated stock boot's preloader log
++against a real-device UART capture (exact / prefix / emu-only /
++device-only line classes).
++"""
++import argparse
++import json
++import struct
++import sys
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
++
++TEE_LOADER = 0x20E19C
++
++
++def leg_chain(slot: str) -> tuple[bool, str]:
++    from crumpet_emu import resources
++    from crumpet_emu.flash.image import Flash
++    from crumpet_emu.preloader import constants as pc
++    from crumpet_emu.preloader import emu as pe
++    tz = resources.own(f'tz-lk{slot[-1]}.img').read_bytes()
++    patched = resources.resolve('lk-patched', '2021').read_bytes()
++    tee2 = resources.resolve('tee2', '2021').read_bytes()
++    syms = pe.parse_elf_symbols(resources.own(f'payload-lk{slot[-1]}.elf'))
++    emu = pe.Emu(Flash(tz, patched, tee2), sbc=True, payload_syms=syms)
++    pe.arm_device(emu)
++    namep = pc.SCRATCH + 0x90
++    emu.uc.mem_write(namep, b'tee1\x00')
++    tee_addr, tee_size = pc.SCRATCH + 0x48, pc.SCRATCH + 0x4C
++    emu.uc.mem_write(tee_addr, struct.pack('<I', pc.TEE_LOAD_ADDR))
++    ret = emu.try_call(TEE_LOADER, (namep, pc.BDEV, tee_addr, 0, tee_size),
++                       timeout=120_000_000)
++    if emu.stopped or emu.faulted:
++        return False, f'stopped={emu.stopped} faulted={emu.faulted}'
++    if ret != 0xFFFFFFFF:
++        return False, f'tee1 load returned {ret:#x} (want read-abort error)'
++    dsize, = struct.unpack_from('<I', patched, 4)
++    staged = bytes(emu.uc.mem_read(pc.LK_LOAD_ADDR, dsize))
++    if staged != patched[0x200:0x200 + dsize]:
++        return False, 'patched LK not staged byte-identical'
++    # phase 2: payload's own tee2 loader (real payload code)
++    bltp = syms.get('bldr_load_tee_part')
++    if not bltp:
++        return False, 'payload elf lacks bldr_load_tee_part'
++    namep2 = pc.SCRATCH + 0x80
++    emu.uc.mem_write(namep2, b'tee2\x00')
++    taddr, tsize = pc.SCRATCH + 0x50, pc.SCRATCH + 0x54
++    emu.uc.mem_write(taddr, struct.pack('<I', pc.TEE_LOAD_ADDR))
++    r2 = emu.try_call(bltp, (namep2, pc.BDEV, taddr, 0, tsize),
++                      timeout=60_000_000)
++    r3 = emu.try_call(0x2019B0, (), timeout=5_000_000)   # patched ARB
++    ok = (r2 == 0 and r3 == 0 and emu.verify_calls == 0
++          and not emu.stopped and not emu.faulted)
++    return ok, (f'tee2={r2} arb={r3} verify_calls={emu.verify_calls}')
++
++
++def leg_unlock() -> tuple[bool, str]:
++    from crumpet_emu.lk.customfw import (lock_gate_differential,
++                                         patched_getvar,
++                                         verify_and_vb_differential)
++    g = lock_gate_differential(b'flash:boot')
++    if not (g['stock'] == 1 and g['patched'] == 0):
++        return False, f'lock gate {g}'
++    v = verify_and_vb_differential(
++        b'CRUMPET-CUSTOM-BOOT' + bytes(0x1000 - 18) + bytes(0x800))
++    if v['stock']['ret'] != -0xD or 0x41E115AE not in v['patched']['pcs']:
++        return False, 'verify_and_vb differential failed'
++    status, _ = patched_getvar('version')
++    return status == 'OKAY', f'gate ok, RED-abort skipped, getvar {status}'
++
++
++def leg_brom() -> tuple[bool, str]:
++    from crumpet_emu import resources
++    from crumpet_emu.brom.boot import classify
++    from crumpet_emu.flash.nand import NandChip
++    belt = ('brhgptpl_0', 'brhgptpl_1', 'brhgptpl_2', 'brhgptpl_3',
++            'lk', 'tee1', 'tee2', 'boot')
++    chip = NandChip()
++    chip.load_donors({n: resources.resolve(n, '2021') for n in belt})
++    verdict = classify(chip.dump())
++    return verdict == 'boots_2021_pl', verdict
++
++
++def leg_ledger() -> tuple[bool, str]:
++    from crumpet_emu.preloader.seams import SEAMS, SEAM_CHAIN_CRITICAL
++    bad = [n for n in SEAM_CHAIN_CRITICAL
++           if SEAMS[n].kind == 'reimplemented']
++    return not bad, f'chain-critical reimplemented: {bad or "none"}'
++
++
++def trace_diff(uart_log: Path) -> int:
++    """Classify emulated stock-boot preloader lines vs a real capture."""
++    import io
++    import contextlib
++    from crumpet_emu import resources
++    from crumpet_emu.flash.image import Flash
++    from crumpet_emu.preloader import emu as pe
++    buf = io.StringIO()
++    stock_lk = resources.resolve('lk', '2021').read_bytes()
++    tee2 = resources.resolve('tee2', '2021').read_bytes()
++    with contextlib.redirect_stdout(io.StringIO()):    # scenario prints
++        emu = pe.Emu(Flash(tee2, stock_lk, tee2), sbc=True, log=buf)
++        pe.arm_device(emu)
++        from crumpet_emu.preloader.constants import (BDEV, LK_LOAD_ADDR,
++                                                     PART_LOAD, SCRATCH)
++        lk_part = pe.part_struct(emu, 'lk_a', SCRATCH)
++        a1, s1 = SCRATCH + 0x40, SCRATCH + 0x44
++        emu.uc.mem_write(a1, struct.pack('<I', LK_LOAD_ADDR))
++        emu.try_call(PART_LOAD, (BDEV, lk_part, a1, 0, s1),
++                     timeout=30_000_000)
++    emu_lines = buf.getvalue().splitlines()
++    dev_lines = [l.rstrip('\n') for l in uart_log.read_text(
++        errors='replace').splitlines() if l.strip()]
++    exact = prefix = 0
++    for el in emu_lines:
++        body = el.split('] ', 1)[-1].strip() if '] ' in el else el.strip()
++        if any(body == d.strip() for d in dev_lines):
++            exact += 1
++        elif any(d.strip().startswith(body[:16]) for d in dev_lines):
++            prefix += 1
++    print(f'trace-diff vs {uart_log}: emu PL lines {len(emu_lines)}, '
++          f'device lines {len(dev_lines)}, exact {exact}, prefix {prefix}')
++    return exact
++
++
++def main(argv=None):
++    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
++    ap.add_argument('--slot', choices=['lk_a', 'lk_b', 'both'],
++                    default='both')
++    ap.add_argument('--skip-brom', action='store_true')
++    ap.add_argument('--json', type=Path, default=None)
++    ap.add_argument('--trace-diff', type=Path, metavar='UART_LOG',
++                    help='classify an emulated stock boot against a real '
++                         'device UART capture')
++    args = ap.parse_args(argv)
++
++    if args.trace_diff:
++        trace_diff(args.trace_diff)
++        return 0
++
++    slots = ['lk_a', 'lk_b'] if args.slot == 'both' else [args.slot]
++    legs = {}
++    for s in slots:
++        legs[f'chain-{s}'] = leg_chain(s)
++    legs['unlock'] = leg_unlock()
++    if not args.skip_brom:
++        legs['brom'] = leg_brom()
++    legs['ledger'] = leg_ledger()
++
++    print('==== amonet custom-firmware guarantee ====')
++    for name, (ok, detail) in legs.items():
++        print(f'  {"PASS" if ok else "FAIL"}  {name:<12} {detail}')
++    all_ok = all(ok for ok, _ in legs.values())
++    print(f'VERDICT: {"GUARANTEE HOLDS" if all_ok else "GUARANTEE BROKEN"}')
++    if args.json:
++        args.json.write_text(json.dumps(
++            {k: {'ok': v[0], 'detail': v[1]} for k, v in legs.items()},
++            indent=1))
++    return 0 if all_ok else 1
++
++
++if __name__ == '__main__':
++    sys.exit(main())
+diff --git a/tests/test_customfw_guarantee.py b/tests/test_customfw_guarantee.py
+new file mode 100644
+index 0000000..1b3785c
+--- /dev/null
++++ b/tests/test_customfw_guarantee.py
+@@ -0,0 +1,120 @@
++# Tier 2: needs the parked 2021 belt + lk-patched + own artifacts +
++# common:brom (the BROM leg).
++"""Task 7 (guarantee plan): the end-to-end custom-firmware guarantee.
++
++One test, four legs, per active-slot variant (lk_b active -> exploit on
++lk_a, and lk_a active -> exploit on lk_b):
++
++1. deploy() really placed the artifacts on the emulated chip (patched
++   LK on the INACTIVE slot, the slot-matching crafted tz on tee1);
++2. the REAL stock TEE loader boots the crafted tee1 FROM THE DUMP with
++   real seams (parsers, overlap, part_get, RSA) — hijack fires, and the
++   patched LK is staged at 0x41E00000 byte-identical to lk-patched;
++3. those staged bytes are the patched LK the unlock legs execute
++   (Task-6 differentials);
++4. the REAL BROM classifies the dumped 2021 belt as bootable
++   (boots_2021_pl) — the downgrade precondition holds on silicon.
++"""
++import struct
++from types import SimpleNamespace
++
++import pytest
++
++from crumpet_emu.deploy.main import DeployConfig, deploy
++from crumpet_emu.flash.gpt import parse_gpt_from_image
++from crumpet_emu.flash.image import ChipDumpFlash
++from crumpet_emu.flash.nand import NandChip
++from crumpet_emu.resources import available, own, resolve
++from crumpet_emu.usb.transport import FakeTransport, ModeledSession
++
++DONOR_NAMES = ('brhgptpl_0', 'brhgptpl_1', 'brhgptpl_2', 'brhgptpl_3',
++               'lk', 'tee1', 'tee2', 'boot')
++BCB_SLOT_OFFSET = 30
++TEE_LOADER = 0x20E19C
++
++guarantee_gate = pytest.mark.skipif(
++    not (all(available(n, '2021') for n in DONOR_NAMES)
++         and available('lk', '2025')
++         and available('lk-patched', '2021')
++         and available('brom', 'common')),
++    reason='tier2: parked 2021 belt + lk-patched + common:brom required')
++
++
++@pytest.fixture(scope='module', params=['lk_b', 'lk_a'])
++def postflash(request, tmp_path_factory):
++    """One REAL §7.4 deploy per ACTIVE-slot seeding ('_b' or '_a' in
++    misc's BCB): the exploit + patched LK land on the INACTIVE slot."""
++    inactive = 'lk_a' if request.param == 'lk_b' else 'lk_b'
++    suffix = request.param[-1].encode()
++    donors = {name: resolve(name, '2021') for name in DONOR_NAMES}
++    donors['lk'] = resolve('lk', '2025')       # key_continuity lk_year
++    cfg = DeployConfig(donors=donors,
++                       payload_variants={
++                           'lk_a': own('tz-lka.img'),
++                           'lk_b': own('tz-lkb.img')},
++                       patched_lk=resolve('lk-patched', '2021'),
++                       backup_dir=tmp_path_factory.mktemp(f'cfw-{suffix}')
++                       / 'backup')
++    chip = NandChip()
++    chip.load_donors(donors)
++    gpt = parse_gpt_from_image(donors['brhgptpl_0'].read_bytes())
++    bcb = bytearray(b'\xff' * NandChip.PAGE_DATA)
++    bcb[BCB_SLOT_OFFSET:BCB_SLOT_OFFSET + 4] = suffix + b'\x00\x00\x00'
++    chip.erase_block(gpt['misc'][0] // NandChip.PAGES_PER_BLOCK)
++    chip.program_page(gpt['misc'][0],
++                      bytes(bcb) + b'\xff' * NandChip.PAGE_SPARE)
++    assert deploy(FakeTransport(ModeledSession(chip)), cfg), 'deploy failed'
++    return SimpleNamespace(chip=chip, gpt=gpt, dump=chip.dump(),
++                           inactive=inactive, suffix=suffix)
++
++
++@guarantee_gate
++def test_customfw_guarantee(postflash):
++    # ---- leg 1: the deploy really placed the artifacts (dump provenance)
++    patched = resolve('lk-patched', '2021').read_bytes()
++    dsize, = struct.unpack_from('<I', patched, 4)
++    gpt, dump = postflash.gpt, postflash.dump
++    assert dump[gpt[postflash.inactive][0]][:NandChip.PAGE_DATA] \
++        == patched[:NandChip.PAGE_DATA], 'patched LK not at inactive slot'
++    tz = own(f'tz-lk{postflash.inactive[-1]}.img').read_bytes()
++    assert dump[gpt['tee1'][0]][:NandChip.PAGE_DATA] == tz[:NandChip.PAGE_DATA], \
++        'crafted tz variant not at tee1'
++
++    # ---- leg 2: REAL stock loader boots the crafted tee1 from the dump
++    from crumpet_emu.preloader import constants as pc
++    from crumpet_emu.preloader import emu as pe
++    flash = ChipDumpFlash(dump)
++    syms = pe.parse_elf_symbols(own(f'payload-lk{postflash.inactive[-1]}.elf'))
++    emu = pe.Emu(flash, sbc=True, payload_syms=syms)
++    pe.arm_device(emu)
++    namep = pc.SCRATCH + 0x90
++    emu.uc.mem_write(namep, b'tee1\x00')
++    tee_addr, tee_size = pc.SCRATCH + 0x48, pc.SCRATCH + 0x4C
++    emu.uc.mem_write(tee_addr, struct.pack('<I', pc.TEE_LOAD_ADDR))
++    ret = emu.try_call(TEE_LOADER, (namep, pc.BDEV, tee_addr, 0, tee_size),
++                       timeout=120_000_000)
++    assert not emu.faulted and not emu.stopped
++    assert ret == 0xFFFFFFFF, 'tee1 must fail (payload read-abort)'
++    payload = own(f'payload-lk{postflash.inactive[-1]}.bin').read_bytes()
++    assert bytes(emu.uc.mem_read(pc.PAYLOAD_ADDR, 4)) == payload[:4], \
++        'payload not staged from the dump'
++    staged = bytes(emu.uc.mem_read(pc.LK_LOAD_ADDR, dsize))
++    assert staged == patched[0x200:0x200 + dsize], \
++        'patched LK not staged byte-identical at 0x41E00000'
++    assert emu.verify_calls == 0, \
++        'the LK gate must be skipped by the payload patch (custom LK)'
++
++    # ---- leg 3: the staged bytes are the patched LK the unlock legs run
++    from crumpet_emu.lk.customfw import (lock_gate_differential,
++                                         verify_and_vb_differential)
++    d = lock_gate_differential(b'flash:boot')
++    assert d['stock'] == 1 and d['patched'] == 0
++    v = verify_and_vb_differential(
++        b'CRUMPET-CUSTOM-BOOT' + bytes(0x1000 - 18) + bytes(0x800))
++    assert v['stock']['ret'] == -0xD
++    assert 0x41E115AE in v['patched']['pcs']
++
++    # ---- leg 4: the REAL BROM boots the dumped 2021 belt
++    from crumpet_emu.brom.boot import classify
++    assert classify(dump) == 'boots_2021_pl', \
++        'the dumped belt must boot through the real BROM (downgrade holds)'
+diff --git a/tests/test_lk_customfw.py b/tests/test_lk_customfw.py
+new file mode 100644
+index 0000000..6ee062c
+--- /dev/null
++++ b/tests/test_lk_customfw.py
+@@ -0,0 +1,91 @@
++# Tier 2: needs 2025:lk + 2021:lk-patched (+ any boot for context).
++"""Task 6 (guarantee plan): the PATCHED LK executes — the unlock gate
++and the unsigned-boot acceptance run as real code on patched bytes, with
++the stock 2025 LK as the locked-device differential.
++"""
++import struct
++
++import pytest
++
++from crumpet_emu import resources
++
++needs_lk = pytest.mark.skipif(
++    not (resources.available('lk', '2025')
++         and resources.available('lk-patched', '2021')),
++    reason='pinned 2025:lk + 2021:lk-patched not placed')
++
++LOCK_GATE = 0x41E0EF18          # cmd_lock_check
++VERIFY_AND_VB = 0x41E11548      # boot_image_verify_and_vb
++RED_BLOCK = 0x41E1158E          # first PC of the RED abort block
++PUBLISH = 0x41E115AE            # the RED-abort branch target (publish path)
++
++# small unsigned custom boot image: fast verify failure (cert parse)
++CUSTOM_BOOT = b'CRUMPET-CUSTOM-BOOT' + bytes(0x1000 - 18) + bytes(0x800)
++
++
++@needs_lk
++def test_seed_validity_on_patched_bytes():
++    """Every seed/F VMA the unlock legs use disassembles identically on
++    patched and stock bytes EXCEPT the three intended patch sites
++    (plan Review Focus #3)."""
++    from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
++    stock = resources.resolve('lk', '2025').read_bytes()
++    patched = resources.resolve('lk-patched', '2021').read_bytes()
++    md = Cs(CS_ARCH_ARM, CS_MODE_THUMB)
++    base, hdr = 0x41E00000, 0x200
++    sites = {LOCK_GATE, 0x41E114B0, 0x41E1158C}
++    for vma in (LOCK_GATE, VERIFY_AND_VB, 0x41E00F58, 0x41E1F5C0,
++                0x41E1EA40, 0x41E1DFA8, 0x41E1E050, 0x41E1E1A2):
++        s = [i.bytes.hex() for i in md.disasm(
++            stock[vma - base + hdr:vma - base + hdr + 8], vma)]
++        p = [i.bytes.hex() for i in md.disasm(
++            patched[vma - base + hdr:vma - base + hdr + 8], vma)]
++        if vma in sites:
++            assert s != p, f'{hex(vma)} is a patch site: bytes must differ'
++        else:
++            assert s == p and s, f'{hex(vma)} drifted between stock/patched'
++
++
++@needs_lk
++def test_lock_gate_differential():
++    """REAL cmd_lock_check: stock restricts 'flash:boot' (ret 1), patched
++    allows it (ret 0); getvar:version is allowed on both (not blocklisted)."""
++    from crumpet_emu.lk.customfw import lock_gate_differential
++    d = lock_gate_differential(b'flash:boot')
++    assert d['stock'] == 1, 'stock must restrict flash: on a locked device'
++    assert d['patched'] == 0, 'patched gate must return allowed (0)'
++    g = lock_gate_differential(b'getvar:version')
++    assert g['stock'] == 0 and g['patched'] == 0
++
++
++@needs_lk
++def test_verify_and_vb_differential():
++    """REAL verify_and_vb on an unsigned custom boot image: stock takes
++    the RED block (FAILED AUTHENTICATION, ret -0xD); the patched
++    RED-abort branch skips to the publish path."""
++    from crumpet_emu.lk.customfw import verify_and_vb_differential
++    d = verify_and_vb_differential(CUSTOM_BOOT)
++    s, p = d['stock'], d['patched']
++    assert s['ret'] == -0xD, f'stock must abort unsigned boot, got {s["ret"]}'
++    assert 'FAILED AUTHENTICATION' in '\n'.join(s['logs'])
++    assert RED_BLOCK in s['pcs'], 'stock must execute the RED block'
++    assert RED_BLOCK not in p['pcs'], 'patched must skip the RED block'
++    assert PUBLISH in p['pcs'], 'patched must continue into the publish path'
++
++
++@needs_lk
++def test_patched_getvar_okay():
++    """Dispatcher plumbing on patched bytes: getvar:version replies OKAY."""
++    from crumpet_emu.lk.customfw import patched_getvar
++    status, message = patched_getvar('version')
++    assert status == 'OKAY'
++
++
++@needs_lk
++def test_vbstate_stock_red():
++    """Stock sets vbstate RED (3) in the guest cell for the unsigned
++    image; the patched run never writes RED."""
++    from crumpet_emu.lk.customfw import verify_and_vb_differential, VBSTATE_CELL
++    d = verify_and_vb_differential(CUSTOM_BOOT)
++    assert d['stock']['vbstate'] == 3
++    assert d['patched']['vbstate'] != 3
+diff --git a/tests/test_pl_hostcrypto.py b/tests/test_pl_hostcrypto.py
+new file mode 100644
+index 0000000..a667deb
+--- /dev/null
++++ b/tests/test_pl_hostcrypto.py
+@@ -0,0 +1,83 @@
++# Tier 2: needs the pinned 2021 belt (+ lk-patched).
++"""Task 5 (guarantee plan): VERIFY_LK uses REAL host-side RSA-2048/PSS
++verification against the Amazon LK modulus embedded in the pinned
++2021:brhgptpl_0 (recipe: recovery-notes/preloader-vuln-signature.md §3.1
++— data_len = size-0x100, sig = last 0x100 bytes, SHA-256 over the data,
++PSS salt 0x20, modulus 0x800 bits, key VMA 0x22244C / file 0x02974C).
++"""
++import struct
++
++import pytest
++
++from crumpet_emu import resources
++
++needs_pl = pytest.mark.skipif(
++    not (resources.available('brhgptpl_0', '2021')
++         and resources.available('lk', '2021')
++         and resources.available('lk-patched', '2021')),
++    reason='pinned 2021 belt + lk-patched not placed')
++
++LK_SUB_SIZE = 232680     # stock lk sub-image size incl. 0x100 signature
++
++
++def _sub_image(name):
++    img = resources.resolve(name, '2021').read_bytes()
++    return img[0x200:0x200 + LK_SUB_SIZE]
++
++
++@needs_pl
++def test_stock_lk_sub_image_verifies():
++    from crumpet_emu.preloader.hostcrypto_pl import verify_lk_signature
++    pl = resources.resolve('brhgptpl_0', '2021').read_bytes()
++    assert verify_lk_signature(_sub_image('lk'), pl) is True
++
++
++@needs_pl
++def test_tampered_lk_fails():
++    from crumpet_emu.preloader.hostcrypto_pl import verify_lk_signature
++    pl = resources.resolve('brhgptpl_0', '2021').read_bytes()
++    bad = bytearray(_sub_image('lk'))
++    bad[0x1000] ^= 0xFF                      # tamper signed DATA
++    assert verify_lk_signature(bytes(bad), pl) is False
++    bad2 = bytearray(_sub_image('lk'))
++    bad2[-1] ^= 0xFF                         # tamper the SIGNATURE
++    assert verify_lk_signature(bytes(bad2), pl) is False
++
++
++@needs_pl
++def test_patched_lk_fails_verification():
++    """The patched LK is genuinely unsigned — real crypto must reject it.
++    This is what makes the payload's LK_VERIFY_GATE_PATCH load-bearing:
++    without the gate skip, part_load would fail the custom LK every boot
++    (the brick-2 mechanism)."""
++    from crumpet_emu.preloader.hostcrypto_pl import verify_lk_signature
++    pl = resources.resolve('brhgptpl_0', '2021').read_bytes()
++    assert verify_lk_signature(_sub_image('lk-patched'), pl) is False
++
++
++@needs_pl
++def test_garbage_fails():
++    from crumpet_emu.preloader.hostcrypto_pl import verify_lk_signature
++    pl = resources.resolve('brhgptpl_0', '2021').read_bytes()
++    assert verify_lk_signature(b'\x00' * 0x1000, pl) is False
++    assert verify_lk_signature(b'\x5a' * 0x400, pl) is False
++
++
++@needs_pl
++def test_verify_lk_seam_uses_real_crypto():
++    """The VERIFY_LK seam passes the stock sub-image and fails a tampered
++    one through the REAL crypto path (events say real-verify)."""
++    from crumpet_emu.preloader.emu import Emu
++    from crumpet_emu.preloader.constants import VERIFY_LK
++    from crumpet_emu.flash.image import Flash
++    stock = resources.resolve('lk', '2021').read_bytes()
++    emu = Emu(Flash(b'x' * 0x200, stock, b'y' * 0x200), sbc=True)
++    sub = stock[0x200:0x200 + LK_SUB_SIZE]
++    emu.uc.mem_write(0x42000000, sub)
++    ret = emu.call(VERIFY_LK, (0x42000000, LK_SUB_SIZE), timeout=5_000_000)
++    assert ret == 0 and emu.verify_calls == 1
++    bad = bytearray(sub); bad[0x999] ^= 1
++    emu.uc.mem_write(0x42000000, bytes(bad))
++    ret2 = emu.call(VERIFY_LK, (0x42000000, LK_SUB_SIZE), timeout=5_000_000)
++    assert ret2 == 0xFFFFFFFF and emu.verify_calls == 2
++    assert any('real-rsa' in e for e in emu.events)
+diff --git a/tests/test_real_parse_overlap.py b/tests/test_real_parse_overlap.py
+new file mode 100644
+index 0000000..7476443
+--- /dev/null
++++ b/tests/test_real_parse_overlap.py
+@@ -0,0 +1,134 @@
++# Tier 2: needs the pinned 2021 belt + committed own artifacts.
++"""Task 2 (guarantee plan): the REAL sequential header parser
++(sub_20F2D8) and REAL check_part_overlapped (sub_20F398) execute on the
++amonet chain — the reimplemented stubs are legacy-only
++(``Emu(..., legacy_seams=True)``).
++
++The strongest test drives the REAL stock TEE loader sub_20E19C against
++the crafted tz image (the shape the CLI previously fabricated with
++``part_load`` at offset 0xE800 + ``*addr == 0``): the loader's own walk
++dynamically proves P3 (the crafted sub-image's fallback load address is
++the loader's zero-initialized cell), the atf sub-image lands at
++TEE_LOAD_ADDR first, and the hijack fires from the REAL copy loop.
++"""
++import struct
++
++import pytest
++
++from crumpet_emu import resources
++from crumpet_emu.flash.image import Flash
++
++needs_pl = pytest.mark.skipif(
++    not (resources.available('brhgptpl_0', '2021')
++         and resources.available('lk', '2021')
++         and resources.available('tee2', '2021')),
++    reason='pinned 2021 belt not placed — binaries/vendor/2021/ or env vars')
++
++TEE_LOADER = 0x20E19C          # stock TEE-part loader (port doc §2)
++NAME_TABLE = 0x224910          # check_part_overlapped name table (.data)
++LK_REGION = NAME_TABLE + 0x10  # claimed-range global (init {0,0} in-file)
++
++
++def _chain_emu(**kw):
++    """Crafted-lka belt with real seams (the new default)."""
++    from crumpet_emu.preloader.emu import (Emu, arm_device, part_struct,
++                                           parse_elf_symbols)
++    from crumpet_emu.preloader.constants import (BDEV, SCRATCH, TEE_LOAD_ADDR)
++    tz = resources.own('tz-lka.img').read_bytes()
++    stock_lk = resources.resolve('lk', '2021').read_bytes()
++    tee2 = resources.resolve('tee2', '2021').read_bytes()
++    syms = parse_elf_symbols(resources.own('payload-lka.elf'))
++    emu = Emu(Flash(tz, stock_lk, tee2), sbc=True, payload_syms=syms,
++              stock_ok=stock_lk, **kw)
++    arm_device(emu)
++    namep = SCRATCH + 0x90
++    emu.uc.mem_write(namep, b'tee1\x00')
++    tee_addr, tee_size = SCRATCH + 0x48, SCRATCH + 0x4C
++    emu.uc.mem_write(tee_addr, struct.pack('<I', TEE_LOAD_ADDR))
++    return emu, (namep, BDEV, tee_addr, 0, tee_size)
++
++
++@needs_pl
++def test_real_loader_walk_crafted_tee1():
++    """REAL sub_20E19C on the crafted image: full first-stage exploit on
++    real code — atf walked first at TEE_LOAD_ADDR, crafted sub-image
++    driven by the loader's own *addr==0 cell, hijack fires, payload
++    staged, custom LK loaded, loader returns the tee1-failure error."""
++    from crumpet_emu.preloader.constants import PAYLOAD_ADDR, LK_LOAD_ADDR
++    emu, args = _chain_emu()
++    ret = emu.try_call(TEE_LOADER, args, timeout=120_000_000)
++    assert not emu.faulted and not emu.stopped
++    assert ret == 0xFFFFFFFF, 'tee1 load must fail (payload aborts the read)'
++    payload = resources.own('payload-lka.bin').read_bytes()
++    assert bytes(emu.uc.mem_read(PAYLOAD_ADDR, 4)) == payload[:4], \
++        'real payload not staged at 0x101000'
++    assert bytes(emu.uc.mem_read(LK_LOAD_ADDR, 16)) == \
++        resources.resolve('lk', '2021').read_bytes()[0x200:0x210], \
++        'stock LK (chain default --lk) not staged at 0x41E00000'
++    ev = '\n'.join(emu.events)
++    assert "name=b'atf'" in ev and 'start=0x43001000' in ev, \
++        'atf sub-image must walk first at TEE_LOAD_ADDR (real loader)'
++    assert "name=b'lk'" in ev and 'start=0x0 end=0x108803' in ev, \
++        'crafted sub-image load must land at 0 via the loader fallback (P3)'
++
++
++@needs_pl
++def test_guest_lk_region_claimed_by_real_code():
++    """The REAL check_part_overlapped claims [0, dsize-1] in the GUEST
++    lk_region cells for the crafted 'lk' sub-image (table @0x224910)."""
++    emu, args = _chain_emu()
++    emu.try_call(TEE_LOADER, args, timeout=120_000_000)
++    claimed = struct.unpack('<II', bytes(emu.uc.mem_read(LK_REGION, 8)))
++    assert claimed == (0, 0x108803), \
++        f'guest lk_region {claimed!r} != claimed (0, 0x108803)'
++
++
++@needs_pl
++def test_crafted_name_tee_panics_real_overlap():
++    """A crafted sub-image named 'TEE' (not in the name table) with
++    load address 0 is inside the initial lk_region {0,0} — the REAL
++    check_part_overlapped must take the assert path (panic oracle)."""
++    from crumpet_emu.preloader.constants import SCRATCH, BDEV, PART_LOAD
++    emu, _ = _chain_emu()
++    bad = bytearray(resources.own('tz-lka.img').read_bytes())
++    bad[0xE800 + 8:0xE800 + 11] = b'TEE'      # sub-image name 'lk' -> 'TEE'
++    from crumpet_emu.preloader.emu import part_struct
++    from crumpet_emu.flash.image import Flash as F
++    stock_lk = resources.resolve('lk', '2021').read_bytes()
++    tee2 = resources.resolve('tee2', '2021').read_bytes()
++    from crumpet_emu.preloader.emu import parse_elf_symbols
++    emu.f = F(bytes(bad), stock_lk, tee2)     # swap the tee1 source
++    tee1_part = part_struct(emu, 'tee1', SCRATCH)
++    addr_cell, size_cell = SCRATCH + 0x40, SCRATCH + 0x44
++    emu.uc.mem_write(addr_cell, struct.pack('<I', 0))
++    emu.try_call(PART_LOAD, (BDEV, tee1_part, addr_cell, 0xE800, size_cell),
++                 timeout=60_000_000)
++    assert emu.stopped, 'real overlap check must panic (assert oracle)'
++    assert any('ASSERT' in e for e in emu.events)
++    assert any('check_part_overlapped' in l for l in emu.pl_log), \
++        'the real failure print must reach the preloader log'
++
++
++@needs_pl
++def test_legacy_seams_differential_stock_boot():
++    """Legacy reimplementations vs real code must agree on every stock
++    verdict: calibrate (CAL-1/CAL-2) and stock_boot both PASS under
++    both seam modes (plan Review Focus #1)."""
++    from crumpet_emu.preloader import scenarios
++    for legacy in (True, False):
++        real_emu_cls = None
++        import crumpet_emu.preloader.emu as emu_mod
++        orig = emu_mod.Emu
++
++        class Shim(orig):
++            def __init__(self, *a, **kw):
++                kw.setdefault('legacy_seams', legacy)
++                super().__init__(*a, **kw)
++
++        import crumpet_emu.preloader.scenarios as scen
++        scen.Emu = Shim
++        try:
++            assert scen.calibrate(sbc=True) is True, f'calibrate legacy={legacy}'
++            assert scen.stock_boot(sbc=True) is True, f'stock_boot legacy={legacy}'
++        finally:
++            scen.Emu = orig
+diff --git a/tests/test_real_part_get.py b/tests/test_real_part_get.py
+new file mode 100644
+index 0000000..d22c617
+--- /dev/null
++++ b/tests/test_real_part_get.py
+@@ -0,0 +1,131 @@
++# Tier 2: needs the pinned 2021 belt + committed own artifacts.
++"""Task 3 (guarantee plan): REAL part_get (sub_20F250 + the sub_20F1F8
++walk) executes against a staged partition table whose entries come from
++the REAL GPT (flash.gpt.parse_gpt_from_image on the pinned
++2021:brhgptpl_0). The donor's synthesized part struct is legacy-only.
++"""
++import struct
++
++import pytest
++
++from crumpet_emu import resources
++from crumpet_emu.flash.gpt import parse_gpt_from_image
++
++needs_pl = pytest.mark.skipif(
++    not (resources.available('brhgptpl_0', '2021')
++         and resources.available('lk', '2021')
++         and resources.available('tee2', '2021')),
++    reason='pinned 2021 belt not placed — binaries/vendor/2021/ or env vars')
++
++TEE_LOADER = 0x20E19C
++PART_GET_OUT = 0x102A5C   # the walk's fixed global output struct (.bss;
++                          # computed from the real pool literals — probe)
++PART_GET_NAMEBUF = 0x102A70  # part_get's 0x20-byte input-name copy
++
++
++def _gpt_blocks():
++    """Real GPT (LBA4096 units) -> bdev 512-block units, like the
++    flash.image GPT table the donor stub synthesized from."""
++    img = resources.resolve('brhgptpl_0', '2021').read_bytes()
++    return {n: (s * 8, c * 8) for n, (s, c) in parse_gpt_from_image(img).items()}
++
++
++@needs_pl
++def test_real_part_get_walks_staged_table():
++    """part_get('lk_a') through the REAL walk returns the staged entry
++    (start/nblk from the real GPT, name copied to the walk's buffer);
++    an unknown name returns 0."""
++    from crumpet_emu.preloader.emu import Emu
++    from crumpet_emu.preloader.constants import (BDEV, PART_GET, SCRATCH,
++                                                 SRAM_DBUF_PTR, DRAM_BUF)
++    from crumpet_emu.flash.image import Flash
++    emu = Emu(Flash(b'x' * 0x200, b'y' * 0x200, b'z' * 0x200), sbc=True)
++    namep = SCRATCH
++    emu.uc.mem_write(namep, b'lk_a\x00')
++    ret = emu.call(PART_GET, (namep,), timeout=5_000_000)
++    assert not emu.faulted
++    gpt = _gpt_blocks()
++    assert ret == PART_GET_OUT, \
++        f'real walk must return its global struct {hex(PART_GET_OUT)}, got {hex(ret)}'
++    start, nblk = struct.unpack('<II', bytes(emu.uc.mem_read(ret, 8)))
++    assert (start, nblk) == gpt['lk_a'], \
++        f'real walk returned {(start, nblk)!r} != GPT lk_a {gpt["lk_a"]!r}'
++    assert bytes(emu.uc.mem_read(PART_GET_NAMEBUF, 8)).split(b'\x00')[0] \
++        == b'lk_a', 'the real part_get memcpy must land the name at 0x102A70'
++    namep_out = struct.unpack('<I', bytes(emu.uc.mem_read(ret + 0x10, 4)))[0]
++    got = bytes(emu.uc.mem_read(namep_out, 8)).split(b'\x00')[0]
++    assert got == b'lk_a'
++    emu.uc.mem_write(namep, b'nosuchpart\x00')
++    ret2 = emu.call(PART_GET, (namep,), timeout=5_000_000)
++    assert ret2 == 0, 'unknown partition must not resolve'
++
++
++@needs_pl
++def test_chain_completes_on_real_part_get():
++    """The full first-stage chain with REAL part_get: the stock loader,
++    the payload's bldr_load_part('lk_a') and phase-2 tee2 loads all
++    resolve partitions through the staged real-GPT table."""
++    from crumpet_emu.preloader.emu import (Emu, arm_device,
++                                           parse_elf_symbols)
++    from crumpet_emu.preloader.constants import (BDEV, PAYLOAD_ADDR,
++                                                 LK_LOAD_ADDR, SCRATCH,
++                                                 TEE_LOAD_ADDR)
++    from crumpet_emu.flash.image import Flash
++    tz = resources.own('tz-lka.img').read_bytes()
++    stock_lk = resources.resolve('lk', '2021').read_bytes()
++    tee2 = resources.resolve('tee2', '2021').read_bytes()
++    syms = parse_elf_symbols(resources.own('payload-lka.elf'))
++    emu = Emu(Flash(tz, stock_lk, tee2), sbc=True, payload_syms=syms,
++              stock_ok=stock_lk)
++    arm_device(emu)
++    namep = SCRATCH + 0x90
++    emu.uc.mem_write(namep, b'tee1\x00')
++    tee_addr, tee_size = SCRATCH + 0x48, SCRATCH + 0x4C
++    emu.uc.mem_write(tee_addr, struct.pack('<I', TEE_LOAD_ADDR))
++    ret = emu.try_call(TEE_LOADER, (namep, BDEV, tee_addr, 0, tee_size),
++                       timeout=120_000_000)
++    assert not emu.faulted and not emu.stopped
++    assert ret == 0xFFFFFFFF
++    payload = resources.own('payload-lka.bin').read_bytes()
++    assert bytes(emu.uc.mem_read(PAYLOAD_ADDR, 4)) == payload[:4]
++    assert bytes(emu.uc.mem_read(LK_LOAD_ADDR, 16)) == stock_lk[0x200:0x210]
++    gpt = _gpt_blocks()
++    ev = '\n'.join(emu.events)
++    assert f'READ bdev={hex(BDEV)} blk={gpt["lk_a"][0]} ' in ev, \
++        'the custom-LK load must read at the real GPT lk_a start block'
++    out = struct.unpack('<II', bytes(emu.uc.mem_read(PART_GET_OUT, 8)))
++    assert out == gpt['lk_a'], \
++        f'last real part_get (lk_a) global struct {out!r} != GPT {gpt["lk_a"]!r}'
++
++
++@needs_pl
++def test_part_get_legacy_differential():
++    """Legacy synthesized struct vs real walk: the chain verdicts agree
++    (payload staged, LK bytes, no panic) — plan Review Focus #1."""
++    from crumpet_emu.preloader.emu import (Emu, arm_device,
++                                           parse_elf_symbols)
++    from crumpet_emu.preloader.constants import (BDEV, PAYLOAD_ADDR,
++                                                 LK_LOAD_ADDR, SCRATCH,
++                                                 TEE_LOAD_ADDR)
++    from crumpet_emu.flash.image import Flash
++    tz = resources.own('tz-lka.img').read_bytes()
++    stock_lk = resources.resolve('lk', '2021').read_bytes()
++    tee2 = resources.resolve('tee2', '2021').read_bytes()
++    syms = parse_elf_symbols(resources.own('payload-lka.elf'))
++    payload = resources.own('payload-lka.bin').read_bytes()
++    for legacy in (True, False):
++        emu = Emu(Flash(tz, stock_lk, tee2), sbc=True, payload_syms=syms,
++                  stock_ok=stock_lk, legacy_seams=legacy)
++        arm_device(emu)
++        namep = SCRATCH + 0x90
++        emu.uc.mem_write(namep, b'tee1\x00')
++        tee_addr, tee_size = SCRATCH + 0x48, SCRATCH + 0x4C
++        emu.uc.mem_write(tee_addr, struct.pack('<I', TEE_LOAD_ADDR))
++        ret = emu.try_call(TEE_LOADER, (namep, BDEV, tee_addr, 0, tee_size),
++                           timeout=120_000_000)
++        assert not emu.faulted and not emu.stopped, f'legacy={legacy}'
++        assert ret == 0xFFFFFFFF, f'legacy={legacy}'
++        assert bytes(emu.uc.mem_read(PAYLOAD_ADDR, 4)) == payload[:4], \
++            f'legacy={legacy}'
++        assert bytes(emu.uc.mem_read(LK_LOAD_ADDR, 16)) == stock_lk[0x200:0x210], \
++            f'legacy={legacy}'
+diff --git a/tests/test_scenario_clis.py b/tests/test_scenario_clis.py
+index fbc9335..25591ab 100644
+--- a/tests/test_scenario_clis.py
++++ b/tests/test_scenario_clis.py
+@@ -4,21 +4,22 @@
+ # (the same clean-missing-binary contract the Review Focus #2 duty pins
+ # for the package).
+ import importlib.util
+ import subprocess
+ import sys
+ from pathlib import Path
+ 
+ import pytest
+ 
+ REPO = Path(__file__).resolve().parent.parent
+-SCENARIOS = ('boot_brom', 'lk_unlock', 'differential', 'fuzz_fastboot')
++SCENARIOS = ('boot_brom', 'lk_unlock', 'differential', 'fuzz_fastboot',
++            'guarantee')
+ 
+ 
+ def _load(name):
+     spec = importlib.util.spec_from_file_location(
+         f'scenarios.{name}', REPO / 'scenarios' / f'{name}.py')
+     mod = importlib.util.module_from_spec(spec)
+     spec.loader.exec_module(mod)
+     return mod
+ 
+ 
+diff --git a/tests/test_seam_ledger.py b/tests/test_seam_ledger.py
+new file mode 100644
+index 0000000..09c7eaf
+--- /dev/null
++++ b/tests/test_seam_ledger.py
+@@ -0,0 +1,63 @@
++# Tier 1: the seam ledger is package data — no bins needed.
++"""Task 1 (guarantee plan): every amonet-chain seam the preloader Emu
++intercepts is inventoried in crumpet_emu.preloader.seams with an honest
++classification and a citation, and the inventory tracks the code (VMAs
++cross-checked against crumpet_emu.preloader.constants).
++"""
++import pytest
++
++from crumpet_emu.preloader import seams
++from crumpet_emu.preloader import constants as C
++
++# The address set Emu.hook_code intercepts on the amonet chain (plan
++# Task 1 list). Keys are seam names; values are the constants-module
++# attributes (or literal VMAs for the unnamed inline sites).
++INTERCEPTED = {
++    'hdr_parse': 'HDR_PARSE',
++    'overlap_chk': 'OVERLAP_CHK',
++    'part_get': 'PART_GET',
++    'bdev_init': 'BDEV_INIT',
++    'part_load': 'PART_LOAD',
++    'verify_lk': 'VERIFY_LK',
++    'mtee_verify': 'MTEE_VERIFY',
++    'tee_set_entry': 'TEE_SET_ENTRY',
++    'secmem_rearm': 'SECMEM_REARM',
++    'assert': 'ASSERT',
++    'usb_handshake': 'USB_HANDSHAKE',
++    'memcpy': 'MEMCPY',
++    'timer_get': 'TIMER_GET',
++    'arb_fuse_read': 0x20192C,
++    'tee_ver_get': 0x21A560,
++    'lk_ver_get': 0x201EE8,
++    'tramp': 'TRAMP',
++    'uart_thr': 'UART_THR',
++    'printf': 'PRINTF',
++    'efuse_sbc': 'EFUSE_SBC',
++}
++
++
++def test_every_intercepted_seam_documented():
++    for name, attr in INTERCEPTED.items():
++        vma = getattr(C, attr) if isinstance(attr, str) else attr
++        assert name in seams.SEAMS, f'{name} missing from SEAMS'
++        s = seams.SEAMS[name]
++        assert s.vma == vma, \
++            f'{name} ledger VMA {hex(s.vma)} != code {hex(vma)}'
++        assert s.kind in seams.KINDS, f'{name} kind {s.kind!r} not in taxonomy'
++        assert s.citation and len(s.citation) > 10, \
++            f'{name} citation empty/short: {s.citation!r}'
++
++
++def test_no_stale_ledger_entries():
++    ledger_names = set(seams.SEAMS)
++    assert ledger_names == set(INTERCEPTED), (
++        f'ledger/code drift: extra={ledger_names - set(INTERCEPTED)} '
++        f'missing={set(INTERCEPTED) - ledger_names}')
++
++
++def test_chain_critical_seams_not_reimplemented():
++    """Forcing function (plan Task 1): hdr_parse/overlap_chk/part_get must
++    not stay host reimplementations once Tasks 2-3 land."""
++    for name in seams.SEAM_CHAIN_CRITICAL:
++        assert seams.SEAMS[name].kind not in ('reimplemented',), (
++            f'{name} still {seams.SEAMS[name].kind!r}')
