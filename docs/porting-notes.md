@@ -420,3 +420,26 @@ Entry values come from flash.gpt.parse_gpt_from_image on the pinned
 2021:brhgptpl_0 (LBA4096 -> 512-block x8, the donor GPT-dict rule) — the
 boot-time part_init build is the staged state (LK-platform.py
 boot-state precedent). Hook observes only (part_get[real] event).
+
+### Task-4 ruling (guarantee plan): bdev_init stays staged; NFI-model
+### extension deferred
+
+Probe result (probes/bdev_init_probe3.py): the REAL sub_212EFC runs
+under the preloader Emu with the NfiModel + donor NandChip mapped, but
+takes its error branch — the pl2021 NAND probe handshake (11 NFI
+accesses; polls at NFI+0x14/0x220 the model answers 0) is not covered
+by NfiModel, which was built for the BROM-payload stage2 driver traffic.
+Full decode recovered instead (pool-literal math in the probe):
+- real init targets the SAME struct 0x1086EC (memset 0x2C B);
+- fields from the probe ctx: id @+0, blksize ctx+0x9C @+4, ctx+0xA4
+  @+8, ctx+0x94 @+0xC;
+- read method @+0x20 = **0x212AA1** (real mtk_nfc read; |1 Thumb),
+  +0x24 = 0x2127B3.
+
+Decision: keep the re-arm stub (kind 'staged', citation above) — after
+the payload hijack, the only chain consumer of the struct is the
++0x20 indirection part_load calls per block; the stub restores exactly
+that mechanism with observed stock values. Real-init upgrade path:
+extend NfiModel to answer the pl2021 driver register traffic, then the
+whole read path (0x212AA1) becomes real code — deferred as
+high-value-later (ledger minor).

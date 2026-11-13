@@ -29,7 +29,7 @@ the four reimplemented seams.
 | hdr_parse | 0x20F2D8 | **real** (Task 2) | real | tests/test_real_parse_overlap.py |
 | overlap_chk | 0x20F398 | **real** (Task 2) | real | tests/test_real_parse_overlap.py |
 | part_get | 0x20F250 | **real** (Task 3, staged real-GPT table) | real | tests/test_real_part_get.py |
-| bdev_init | 0x212EFC | reimplemented | real or staged+justification | Task 4 |
+| bdev_init | 0x212EFC | **staged** (Task 4 ruling: re-arm stub, real init fully decoded; NfiModel extension deferred) | real (deferred) | porting-notes §guarantee Task 4 |
 
 ## 2. What the emulator proves (per leg)
 

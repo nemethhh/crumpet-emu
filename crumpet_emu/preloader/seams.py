@@ -47,9 +47,16 @@ SEAMS = {
                      'staged real-GPT entry table at *SRAM_DBUF_PTR+0x69244 '
                      '(guarantee Task 3); donor synthesized struct behind '
                      'legacy_seams=True'),
-    'bdev_init': Seam(0x212EFC, 'reimplemented',
-                      'host re-arm of the bdev struct fields replaces '
-                      'sub_212EFC boot_device_init (NAND driver init)'),
+    'bdev_init': Seam(0x212EFC, 'staged',
+                      'host re-arm of the bdev struct replaces sub_212EFC '
+                      'boot_device_init. DECODED (guarantee Task 4 probe): '
+                      'real init memsets 0x2C B at the same 0x1086EC and '
+                      'writes read-fn 0x212AA1 @+0x20 (+0x24 get/erase '
+                      '0x2127B3) — stub writes the same field layout with '
+                      'observed stock values. Real init needs the pl2021 '
+                      'NAND-probe handshake (NFI+0x14/0x220 polling) the '
+                      'NfiModel does not answer (built for BROM-era traffic) '
+                      '— extension deferred, see porting-notes Task-4 ruling'),
     'part_load': Seam(0x20F4A8, 'real',
                       'hook observes entry args only; the real NS6548 '
                       'part_load runs (donor emu_chain docstring)'),
