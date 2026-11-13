@@ -19,7 +19,9 @@ the handful of preloader helpers whose semantics are replicated
 faithfully (see the donor docstring in crumpet_emu/preloader/__init__.py):
 UART writes, the eFuse SBC word, flash reads (served from any
 read(blk, count) -> bytes source, e.g. flash.image.Flash), the RSA
-verify oracle, part_get/header-parse/overlap bookkeeping, and the
+verify (real host crypto since guarantee Task 5), part_get/header-parse/
+overlap bookkeeping (REAL vendor code since guarantee Task 2/3 — the
+donor reimplementations live behind legacy_seams=True), and the
 boot-halting oracles (usbdl handshake hang, assert panic).
 
 The donor builds its own Uc here (verbatim base rule); it does NOT go
@@ -162,7 +164,8 @@ class Emu:
         # reimplemented hdr-parse/overlap stubs; False (default) = REAL
         # sub_20F2D8/sub_20F398 execute, hooks observe only.
         self.payload_syms = payload_syms or {}
-        self.stock_ok = stock_ok  # genuine stock image bytes: RSA passes for these
+        self.stock_ok = stock_ok  # API-compat only: unused since the Task-5
+        # real-crypto VERIFY_LK (kept for donor-callers / legacy_seams docs)
         self.timer = 0
         self.events = []          # oracle log
         self.verify_calls = 0

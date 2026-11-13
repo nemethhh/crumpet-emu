@@ -3,7 +3,8 @@
 verification against the Amazon LK modulus embedded in the pinned
 2021:brhgptpl_0 (recipe: recovery-notes/preloader-vuln-signature.md §3.1
 — data_len = size-0x100, sig = last 0x100 bytes, SHA-256 over the data,
-PSS salt 0x20, modulus 0x800 bits, key VMA 0x22244C / file 0x02974C).
+PSS salt 0x20, modulus 0x800 bits; key VMA re-derived from sub_201D70's
+own pool = 0x222260 / file 0x029560 — the note's 0x22244C is wrong).
 """
 import struct
 

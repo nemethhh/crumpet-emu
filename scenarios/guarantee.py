@@ -134,8 +134,10 @@ def trace_diff(uart_log: Path) -> int:
             exact += 1
         elif any(d.strip().startswith(body[:16]) for d in dev_lines):
             prefix += 1
+    emu_only = len(emu_lines) - exact - prefix
     print(f'trace-diff vs {uart_log}: emu PL lines {len(emu_lines)}, '
-          f'device lines {len(dev_lines)}, exact {exact}, prefix {prefix}')
+          f'device lines {len(dev_lines)}, exact {exact}, prefix {prefix}, '
+          f'emu-only {emu_only}')
     return exact
 
 

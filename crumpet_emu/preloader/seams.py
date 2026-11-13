@@ -68,10 +68,16 @@ SEAMS = {
                       'recovery-note 0x22244C is wrong for this build). '
                       'Silicon truth: only genuinely Amazon-signed images '
                       'pass; tests/test_pl_hostcrypto.py'),
-    'mtee_verify': Seam(0x216140, 'oracle-conservative',
-                        'always-OK for the genuine donor tee2 images the '
-                      'chain loads; the crafted tee1 aborts its read '
-                      'before any verify (real part_load order)'),
+    'mtee_verify': Seam(0x216140, 'stub',
+                        'always-OK — fail-open for arbitrary inputs, NOT '
+                        'conservative (final-review P1). Silicon-equivalent '
+                        'on chain paths: the loader verifies only the '
+                        'GENUINE donor atf sub-image of the crafted tee1 '
+                        '(passes on silicon); the crafted sub-image aborts '
+                        'its read before any verify (real part_load order — '
+                        'pinned dynamically by test_real_parse_overlap::'
+                        'test_crafted_walk_skips_mtee_verify), and the tee2 '
+                        'sub-images it passes are the genuine donor pair'),
     'tee_set_entry': Seam(0x2160A8, 'stub',
                           'entry-cell store (0x108736) skipped; the cell '
                           'has no consumer on the emu chain path (handoff '

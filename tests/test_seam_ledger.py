@@ -61,3 +61,14 @@ def test_chain_critical_seams_not_reimplemented():
     for name in seams.SEAM_CHAIN_CRITICAL:
         assert seams.SEAMS[name].kind not in ('reimplemented',), (
             f'{name} still {seams.SEAMS[name].kind!r}')
+
+
+def test_mtee_kind_not_conservative():
+    """P1 (final review): the mtee hook returns always-OK — that is
+    fail-open, NOT conservative per the taxonomy. Its row must say so
+    (kind 'stub') and carry the chain-path silicon-equivalence citation;
+    the ordering premise (crafted tee1 aborts before any verify) is
+    pinned dynamically in test_real_parse_overlap."""
+    s = seams.SEAMS['mtee_verify']
+    assert s.kind != 'oracle-conservative', (
+        'always-OK is optimistic, not conservative — misclassified')

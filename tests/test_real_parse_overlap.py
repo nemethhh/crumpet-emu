@@ -84,6 +84,26 @@ def test_guest_lk_region_claimed_by_real_code():
 
 
 @needs_pl
+def test_crafted_walk_skips_mtee_verify():
+    """P1 ordering premise, pinned dynamically: the REAL stock loader's
+    walk verifies the GENUINE donor atf sub-image of the crafted tee1
+    (mtee event before the crafted sub-image load — that image is
+    Amazon-signed and passes on silicon too), but NEVER the CRAFTED
+    sub-image: its read aborts inside part_load (copy-before-verify
+    order), so the always-OK mtee seam cannot bless the crafted bytes."""
+    emu, args = _chain_emu()
+    emu.try_call(TEE_LOADER, args, timeout=120_000_000)
+    ev = emu.events
+    crafted_idx = next(i for i, e in enumerate(ev)
+                       if "part_load(part='tee1'" in e and 'off=0xe800' in e)
+    after = [e for e in ev[crafted_idx:] if 'mtee_verify' in e]
+    assert not after, \
+        f'mtee_verify ran on/after the crafted sub-image load: {after}'
+    assert any('mtee_verify' in e for e in ev[:crafted_idx]), \
+        'the genuine atf sub-image should have been verified first'
+
+
+@needs_pl
 def test_crafted_name_tee_panics_real_overlap():
     """A crafted sub-image named 'TEE' (not in the name table) with
     load address 0 is inside the initial lk_region {0,0} — the REAL

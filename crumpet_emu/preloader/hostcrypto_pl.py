@@ -4,12 +4,14 @@
 Recipe = the real verify_lk (sub_201D70) semantics, per
 WS/recovery-notes/preloader-vuln-signature.md §3.1 (IDA-reconstructed):
 data_len = total_size - 0x100, signature = last 0x100 bytes, RSA public
-operation with the Amazon LK modulus embedded in the preloader at VMA
-0x22244C (file offset 0x02974C, 256 B big-endian, e = 65537), SHA-256
-over the signed data, PSS decode with salt length 0x20 and a 0x800-bit
-modulus (embits 2047). The end-to-end cross-check is the stock lk
-sub-image itself: a wrong key cannot verify Amazon's genuine signature
-(pinned by tests/test_pl_hostcrypto.py).
+operation with the Amazon LK modulus embedded in the preloader (256 B
+big-endian, e = 65537), SHA-256 over the signed data, PSS decode with
+salt length 0x20 and a 0x800-bit modulus (embits 2047). The end-to-end
+cross-check is the stock lk sub-image itself: a wrong key cannot verify
+Amazon's genuine signature (pinned by tests/test_pl_hostcrypto.py).
+The key location is re-derived from sub_201D70's own pc-relative pool —
+see KEY_VMA below (the recovery-note's 0x22244C is wrong for this
+build).
 """
 import hashlib
 

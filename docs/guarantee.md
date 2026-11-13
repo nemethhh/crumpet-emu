@@ -30,7 +30,7 @@ seams must not be reimplementations — enforced by
 | bdev_init | 0x212EFC | staged (re-arm; real init fully decoded incl. read-fn 0x212AA1 @+0x20 — NfiModel extension deferred) | porting-notes §guarantee Task 4 |
 | verify_lk | 0x201D70 | **real-crypto-host** (RSA-2048/PSS vs the embedded Amazon modulus, key VMA 0x222260) | tests/test_pl_hostcrypto.py |
 | part_load | 0x20F4A8 | real (always was) | suite (38 donor tests + chain) |
-| mtee_verify | 0x216140 | oracle-conservative (donor tee2 passes; crafted tee1 aborts before verify — real part_load order) | suite |
+| mtee_verify | 0x216140 | stub, fail-open by construction but silicon-equivalent on chain paths (ordering premise test-pinned; only genuine donor tee2 ever passes) | tests/test_real_parse_overlap.py::test_crafted_walk_skips_mtee_verify |
 | assert / usbdl handshake | 0x21082C / 0x20D7DC | oracle-conservative (panic/halt oracles) | suite (brick repros) |
 | tramp (bdev->read) | SRAM shim | staged (flash bytes host-side; the pointer indirection through bdev+0x20 — the hijack mechanism — is REAL code) | chain tests |
 | fuse/stamps/timers/uart/printf | — | staged (I/O class; ARB patched by the payload regardless) | suite |
@@ -47,7 +47,11 @@ seams must not be reimplementations — enforced by
   block loop; the real payload runs; the patched LK lands at
   0x41E00000; tee2 fallback completes; patched ARB passes with zero
   RSA calls.
-  → `tests/test_real_parse_overlap.py`, `tests/test_customfw_guarantee.py` (both slots, from a real deploy's chip dump).
+  → phase 1: `tests/test_real_parse_overlap.py`; both slots from a real
+  deploy's chip dump: `tests/test_customfw_guarantee.py`; the phase-2
+  tee2-fallback + patched-ARB + zero-RSA legs:
+  `tests/test_layer4_closedloop.py::test_scenario_c_on_postflash_chip`
+  and `scenarios/guarantee.py` chain legs.
 - **RSA gate is load-bearing** — real crypto rejects `lk-patched` (the
   brick-2 mechanism) while the payload's gate patch skips the call:
   `verify_calls == 0` on the chain.
@@ -67,9 +71,10 @@ seams must not be reimplementations — enforced by
   emulated NAND; the chain boots the dump's bytes at true placement.
   → `tests/test_layer4_closedloop.py`, `tests/test_customfw_guarantee.py`.
 - **UART agreement** — `scenarios/guarantee.py --trace-diff
-  no-alexa/…/tp54_gnd.txt`: of the emulated stock-boot PL lines, 8
-  exact + 3 prefix matches in the real capture (the device log's
-  PLFM/PMIC init phase is outside the emulated surgical surface).
+  no-alexa/…/tp54_gnd.txt`: of 14 emulated stock-boot PL lines, 8
+  exact + 3 prefix matches in the 558-line real capture; 3 emu-only
+  (the device log's PLFM/PMIC init phase is outside the emulated
+  surgical surface, and the surgical runs add no device-side lines).
 
 ### Audit findings landed during this work
 
